@@ -1,0 +1,6 @@
+{
+  "name": "케어브릿지",
+  "description": "재가노인지원사업 사회복지사를 위한 따뜻한 감성 스마트 사례관리 AI 시스템 (음성 상담 녹취 분석, 표준서식 자동 생성, 실시간 일정 알림 및 심리지표 분석)",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
