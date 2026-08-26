@@ -21,7 +21,15 @@ import {
   CheckCircle2,
   Home,
   Clock,
-  Maximize2
+  Maximize2,
+  ChevronDown,
+  Layers,
+  ShieldAlert,
+  Building,
+  UserPlus,
+  Zap,
+  Bookmark,
+  Menu
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
 
@@ -39,6 +47,9 @@ interface HeaderProps {
   onSignInWithGoogle?: () => void;
   onOpenScheduler?: () => void;
   onToggleFocusMode?: () => void;
+  onOpenMajorFormsModal?: () => void;
+  onOpenNewClientModal?: () => void;
+  onToggleMobileSidebar?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -53,11 +64,28 @@ export const Header: React.FC<HeaderProps> = ({
   onSignInWithGoogle,
   onOpenScheduler,
   onToggleFocusMode,
+  onOpenMajorFormsModal,
+  onOpenNewClientModal,
+  onToggleMobileSidebar,
 }) => {
   const [isDark, setIsDark] = useState<boolean>(() => {
     return document.documentElement.classList.contains('dark') ||
       localStorage.getItem('carebridge_theme') === 'dark';
   });
+
+  const [currentTime, setCurrentTime] = useState<string>('');
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (isDark) {
@@ -73,275 +101,280 @@ export const Header: React.FC<HeaderProps> = ({
     setIsDark((prev) => !prev);
   };
 
+  const agencyDisplayName = userSettings?.agencyName || userSettings?.institutionName || '도봉재가노인지원서비스센터';
+  const workerDisplayName = userSettings?.socialWorkerName || userSettings?.workerName || '이현정';
+  const workerPosition = userSettings?.workerPosition || '선임 사회복지사';
+
   return (
-    <header className="bg-[#231E1B] text-stone-100 border-b border-[#38302B] sticky top-0 z-40 shadow-sm transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo & Service Title */}
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 via-amber-600 to-amber-700 flex items-center justify-center shadow-md border border-amber-400/30">
-              <HeartHandshake className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-950/80 text-amber-300 border border-amber-700/60">
-                  {userSettings?.agencyName || '재가노인지원사업'}
-                </span>
-                <span className="text-[11px] text-stone-400">
-                  {userSettings?.socialWorkerName ? `${userSettings.socialWorkerName} 담당자` : '따뜻한 스마트 사례관리'}
-                </span>
-              </div>
-              <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-2">
-                케어브릿지
-                <span className="text-[11px] font-semibold text-amber-400 flex items-center gap-1 bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-600/40">
-                  <Sparkles className="w-3 h-3 animate-pulse text-amber-400" />
-                  스마트 AI
-                </span>
-              </h1>
-            </div>
-          </div>
-
-          {/* Quick Stat Badges */}
-          <div className="hidden md:flex items-center space-x-3 text-xs">
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[#2D2622] border border-[#3E342F] text-stone-300">
-              <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-stone-400">관리 어르신:</span>
-              <span className="font-bold text-amber-200">{clientCount}명</span>
-            </div>
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[#2D2622] border border-[#3E342F] text-stone-300">
-              <FileText className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-stone-400">작성 서식:</span>
-              <span className="font-bold text-emerald-200">{docCount}건</span>
-            </div>
-            {user ? (
-              <button
-                type="button"
-                onClick={onOpenScheduler}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/50 text-emerald-300 transition-colors cursor-pointer"
-                title="Google Drive 자동 동기화 스케줄러 열기"
-              >
-                <Clock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span className="font-semibold text-xs">
-                  {userSettings?.autoSyncTime ? `자동 백업 ${userSettings.autoSyncTime}` : '클라우드 스케줄러'}
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onOpenScheduler}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/50 text-amber-300 transition-colors cursor-pointer"
-                title="Google Drive 자동 동기화 스케줄러 설정"
-              >
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span className="font-medium text-xs">자동 동기화 예약</span>
-              </button>
-            )}
-          </div>
-
-          {/* Action CTAs */}
-          <div className="flex items-center space-x-2">
-            {/* Auto-sync Scheduler Quick Button */}
+    <header className="bg-[#241E1B] text-stone-100 border-b border-[#38302B] sticky top-0 z-40 shadow-sm transition-colors select-none">
+      {/* 1. TOP SYSTEM STATUS & USER BAR (희망이음 상단 시스템 헤더) */}
+      <div className="bg-[#1C1715] border-b border-[#332A25] px-2 sm:px-4 py-1.5 text-xs">
+        <div className="max-w-full mx-auto flex items-center justify-between gap-2 sm:gap-4">
+          {/* Logo & Portal Identity + Mobile Hamburger */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Mobile Hamburger Drawer Trigger */}
             <button
-              id="btn-open-scheduler-header"
               type="button"
-              onClick={onOpenScheduler}
-              className="p-2 rounded-xl bg-[#2D2622] hover:bg-[#38302B] text-stone-300 hover:text-amber-300 border border-[#3E342F] transition-colors cursor-pointer"
-              title="Google Drive 자동 동기화 스케줄러 & 푸시 알림 설정"
+              onClick={onToggleMobileSidebar}
+              className="md:hidden p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-300 transition-colors flex items-center justify-center min-w-[36px] min-h-[36px]"
+              aria-label="모바일 사례관리 메뉴 열기"
+              title="사례관리 메뉴"
             >
-              <Clock className="w-4 h-4 text-amber-400" />
+              <Menu className="w-4 h-4 text-amber-400" />
             </button>
-            {/* Google Login or Profile Avatar Button */}
+
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 rounded-lg bg-amber-600 flex items-center justify-center shadow-xs border border-amber-400/40 shrink-0">
+                <HeartHandshake className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
+              </div>
+              <span className="font-extrabold tracking-tight text-white text-xs sm:text-sm flex items-center gap-1">
+                케어브릿지 <span className="text-amber-400 font-semibold text-[10px] sm:text-[11px] hidden xs:inline">희망이음</span>
+              </span>
+            </div>
+            <span className="hidden md:inline-block w-px h-3 bg-stone-700" />
+            <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-amber-200 font-medium bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/40">
+              <Building className="w-3 h-3 text-amber-400" />
+              {agencyDisplayName}
+            </span>
+          </div>
+
+          {/* User Session & Utility Menu */}
+          <div className="flex items-center gap-1.5 sm:gap-3 text-[11px] text-stone-300">
+            <div className="hidden sm:flex items-center gap-1.5 text-stone-400">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>현재시간: <strong className="text-stone-200">{currentTime}</strong></span>
+            </div>
+
+            <span className="hidden sm:inline-block w-px h-3 bg-stone-700" />
+
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="text-amber-300 font-bold truncate max-w-[100px] sm:max-w-none">
+                {workerDisplayName}
+              </span>
+              <span className="text-stone-400 hidden xs:inline">({workerPosition})</span>
+            </div>
+
+            {/* Auto-backup indicator */}
             {user ? (
               <button
                 type="button"
-                onClick={onOpenSettings}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#2D2622] hover:bg-[#38302B] border border-[#3E342F] text-xs text-stone-200 cursor-pointer"
-                title={`${user.name} (${user.email}) - 환경설정 열기`}
+                onClick={onOpenScheduler}
+                className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] hover:bg-emerald-900 transition-colors cursor-pointer"
+                title="Google Drive 자동 동기화 설정"
               >
-                {user.picture ? (
-                  <img
-                    src={user.picture}
-                    alt={user.name}
-                    className="w-5 h-5 rounded-full object-cover border border-amber-400"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-5 h-5 rounded-full bg-amber-600 text-white flex items-center justify-center font-bold text-[10px]">
-                    {user.name.slice(0, 1)}
-                  </div>
-                )}
-                <span className="hidden sm:inline font-medium text-amber-200">{user.name}</span>
+                <Cloud className="w-3 h-3 text-emerald-400" />
+                <span>드라이브 연동 중</span>
               </button>
             ) : (
               <button
-                id="btn-google-login-header"
                 type="button"
                 onClick={onSignInWithGoogle || onOpenSettings}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-[#2D2622] hover:bg-[#38302B] text-stone-200 border border-[#3E342F] transition-colors cursor-pointer"
-                title="Google 계정으로 로그인 및 드라이브 연동"
+                className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded bg-stone-800 text-stone-300 hover:text-amber-200 text-[10px] hover:bg-stone-700 transition-colors cursor-pointer"
+                title="Google 계정 로그인"
               >
-                <LogIn className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">구글 로그인</span>
+                <LogIn className="w-3 h-3 text-amber-400" />
+                <span>로그인</span>
               </button>
             )}
 
-            {/* Settings Modal Button */}
+            {/* Quick Dark Mode */}
             <button
-              id="btn-open-settings-header"
-              type="button"
-              onClick={onOpenSettings}
-              className="p-2 rounded-xl bg-[#2D2622] hover:bg-[#38302B] text-stone-300 hover:text-amber-300 border border-[#3E342F] transition-colors cursor-pointer"
-              title="기관명/담당자/결재란/구글드라이브 환경설정"
-            >
-              <Settings className="w-4 h-4 text-stone-300" />
-            </button>
-
-            {/* Dark Mode Toggle Button */}
-            <button
-              id="btn-toggle-dark-mode"
               type="button"
               onClick={toggleDarkMode}
-              className="p-2 rounded-xl bg-[#2D2622] hover:bg-[#38302B] text-stone-300 hover:text-amber-300 border border-[#3E342F] transition-colors cursor-pointer"
-              title={isDark ? '라이트 모드로 전환' : '야간 업무용 다크 모드로 전환'}
+              className="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-amber-300 transition-colors"
+              title={isDark ? '라이트 모드로 전환' : '야간 다크 모드로 전환'}
             >
-              {isDark ? (
-                <Sun className="w-4 h-4 text-amber-400" />
-              ) : (
-                <Moon className="w-4 h-4 text-stone-300" />
-              )}
+              {isDark ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5" />}
             </button>
 
+            {/* Quick Settings */}
             <button
-              id="header-new-consultation-btn"
-              onClick={onNewConsultation}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition-all cursor-pointer hover:shadow-md hover:scale-[1.02]"
+              type="button"
+              onClick={onOpenSettings}
+              className="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-amber-300 transition-colors"
+              title="기관 환경설정"
             >
-              <Sparkles className="w-4 h-4 text-amber-200" />
-              <span>새 상담 녹취 AI 분석</span>
+              <Settings className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+      </div>
 
+      {/* 2. MAIN HORIZONTAL CATEGORY NAVIGATION BAR (희망이음 스타일 상단 대분류 탭) */}
+      <div className="px-4 bg-[#28211D]">
+        <div className="max-w-full mx-auto flex items-center justify-between">
+          <nav className="flex space-x-1 overflow-x-auto no-scrollbar py-0.5">
+            {/* 1. 나의업무 (홈) */}
+            <button
+              id="tab-portal"
+              type="button"
+              onClick={() => setActiveTab('portal')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'portal' || activeTab === 'dashboard'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <Home className="w-4 h-4 text-amber-400" />
+              <span>나의업무 (홈)</span>
+            </button>
 
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-1 border-t border-[#38302B] pt-1 overflow-x-auto scrollbar-none">
-          <button
-            id="tab-portal"
-            onClick={() => setActiveTab('portal')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'portal'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <Home className="w-4 h-4 text-amber-400" />
-            <span>메인 업무 포털</span>
-          </button>
+            {/* 2. 대상자 관리 */}
+            <button
+              id="tab-clients"
+              type="button"
+              onClick={() => setActiveTab('clients')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'clients'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <Users className="w-4 h-4 text-blue-400" />
+              <span>대상자 관리</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-950 text-blue-300 font-normal">
+                {clientCount}
+              </span>
+            </button>
 
-          <button
-            id="tab-dashboard"
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'dashboard'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4 text-amber-400" />
-            <span>스마트 통합 대시보드</span>
-          </button>
+            {/* 3. AI 녹취·사정 */}
+            <button
+              id="tab-ai-studio"
+              type="button"
+              onClick={() => setActiveTab('ai-studio')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'ai-studio'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>AI 녹취·상담실</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950 text-amber-300 font-semibold animate-pulse">
+                AI
+              </span>
+            </button>
 
-          <button
-            id="tab-ai-studio"
-            onClick={() => setActiveTab('ai-studio')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'ai-studio'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>AI 녹음·텍스트 분석실</span>
-          </button>
+            {/* 4. 10대 법정서식 */}
+            <button
+              id="tab-forms"
+              type="button"
+              onClick={() => setActiveTab('forms')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'forms'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-emerald-400" />
+              <span>10대 법정서식</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 font-normal">
+                {docCount}
+              </span>
+            </button>
 
-          <button
-            id="tab-forms"
-            onClick={() => setActiveTab('forms')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'forms'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <FileText className="w-4 h-4 text-emerald-400" />
-            <span>사례관리 7대 표준서식 작성기</span>
-          </button>
+            {/* 4-B. 주요 법정 서식 퀵 런처 (User Request #4) */}
+            {onOpenMajorFormsModal && (
+              <button
+                id="header-btn-major-forms"
+                type="button"
+                onClick={onOpenMajorFormsModal}
+                className="hidden lg:flex items-center gap-1 px-2.5 py-1 my-1.5 text-xs font-bold rounded-lg bg-emerald-950/70 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900 transition-colors cursor-pointer whitespace-nowrap"
+                title="사례회의록, 서비스계획서 등 주요 서식 즉시 작성"
+              >
+                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                <span>주요 서식 퀵</span>
+              </button>
+            )}
 
-          <button
-            id="tab-routes"
-            onClick={() => setActiveTab('routes')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'routes'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <MapPin className="w-4 h-4 text-rose-400" />
-            <span>방문 동선 지도 & 스케줄</span>
-          </button>
+            {/* 5. 위험도·인사이트 */}
+            <button
+              id="tab-insights"
+              type="button"
+              onClick={() => setActiveTab('insights')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'insights'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <LineChart className="w-4 h-4 text-teal-400" />
+              <span>위험도·인사이트</span>
+            </button>
 
-          <button
-            id="tab-insights"
-            onClick={() => setActiveTab('insights')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'insights'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <LineChart className="w-4 h-4 text-teal-400" />
-            <span>상담 인사이트 & 감정변화</span>
-          </button>
+            {/* 6. 방문동선·일정 */}
+            <button
+              id="tab-routes"
+              type="button"
+              onClick={() => setActiveTab('routes')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'routes'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <MapPin className="w-4 h-4 text-rose-400" />
+              <span>방문동선·일정</span>
+            </button>
 
-          <button
-            id="tab-clients"
-            onClick={() => setActiveTab('clients')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'clients'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <Users className="w-4 h-4 text-blue-400" />
-            <span>재가 어르신 관리 ({clientCount})</span>
-          </button>
+            {/* 7. 문서보관함 */}
+            <button
+              id="tab-archive"
+              type="button"
+              onClick={() => setActiveTab('archive')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'archive'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <FolderCheck className="w-4 h-4 text-stone-400" />
+              <span>문서보관함</span>
+            </button>
 
-          <button
-            id="tab-archive"
-            onClick={() => setActiveTab('archive')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'archive'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <FolderCheck className="w-4 h-4 text-stone-400" />
-            <span>문서 보관함 ({docCount})</span>
-          </button>
+            {/* 8. AI 수퍼비전 */}
+            <button
+              id="tab-supervision"
+              type="button"
+              onClick={() => setActiveTab('supervision')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'supervision'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <Bot className="w-4 h-4 text-purple-400" />
+              <span>AI 수퍼비전</span>
+            </button>
+          </nav>
 
-          <button
-            id="tab-supervision"
-            onClick={() => setActiveTab('supervision')}
-            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'supervision'
-                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
-                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
-            }`}
-          >
-            <Bot className="w-4 h-4 text-teal-400" />
-            <span>AI 슈퍼비전</span>
-          </button>
-        </nav>
+          {/* Quick CTAs */}
+          <div className="hidden sm:flex items-center gap-2 pl-2">
+            {onOpenNewClientModal && (
+              <button
+                id="header-new-client-btn"
+                type="button"
+                onClick={onOpenNewClientModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-600 hover:text-white shadow-xs transition-all cursor-pointer hover:scale-[1.02]"
+                title="새로운 대상자 인적사항 및 사례 등록"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-amber-400" />
+                <span>신규 어르신 등록</span>
+              </button>
+            )}
+
+            <button
+              id="header-new-consultation-btn"
+              type="button"
+              onClick={onNewConsultation}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-all cursor-pointer hover:scale-[1.02]"
+              title="새로운 어르신 상담 녹취 및 AI 분석 시작"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+              <span>신규 상담 시작</span>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
   );

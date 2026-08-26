@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Header, AppTab } from './components/Header';
+import { SubNavSidebar } from './components/SubNavSidebar';
+import { WorkspaceTabBar, OpenWorkspaceTab } from './components/WorkspaceTabBar';
 import { MainPortalHub } from './components/MainPortalHub';
 import { AIStudioTranscript } from './components/AIStudioTranscript';
 import { FormEditor } from './components/FormEditor';
@@ -14,6 +16,9 @@ import { DashboardManagerBar, DashboardPanelConfig } from './components/Dashboar
 import { DashboardWindow } from './components/DashboardWindow';
 import { SettingsModal } from './components/SettingsModal';
 import { AutoSyncSchedulerModal } from './components/AutoSyncSchedulerModal';
+import { NewClientModal } from './components/NewClientModal';
+import { MajorFormsQuickModal } from './components/MajorFormsQuickModal';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import {
   BellRing,
   BrainCircuit,
@@ -30,7 +35,9 @@ import {
   Cloud,
   CheckCircle2,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  Home,
+  Plus
 } from 'lucide-react';
 import { ClientProfile, CaseDocument, UserSettings, GoogleAuthUser, ConsultationInsight, DocumentType } from './types';
 import { INITIAL_CLIENTS, INITIAL_DOCUMENTS } from './data/mockData';
@@ -57,6 +64,19 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('portal');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+
+  // MDI Workspace Open Tabs state
+  const [openTabs, setOpenTabs] = useState<OpenWorkspaceTab[]>([
+    {
+      id: 'tab-portal',
+      tab: 'portal',
+      title: '나의업무 (홈)',
+      icon: <Home className="w-3.5 h-3.5 text-amber-500" />,
+      closable: false,
+    },
+  ]);
+  const [activeTabId, setActiveTabId] = useState<string>('tab-portal');
 
   // Persistent User Settings State
   const [userSettings, setUserSettings] = useState<UserSettings>(() => {
@@ -78,6 +98,9 @@ export default function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState<boolean>(false);
+  const [isNewClientModalOpen, setIsNewClientModalOpen] = useState<boolean>(false);
+  const [isMajorFormsModalOpen, setIsMajorFormsModalOpen] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState<boolean>(false);
   const [driveToast, setDriveToast] = useState<string | null>(null);
   const [lastSyncResult, setLastSyncResult] = useState<{ success: boolean; message: string; timestamp?: string } | null>(null);
@@ -93,7 +116,7 @@ export default function App() {
     return [];
   });
 
-  // Dashboard Card Reordering State (Drag and Drop / Up and Down controls)
+  // Dashboard Card Reordering State
   const [dashboardOrder, setDashboardOrder] = useState<string[]>(() => {
     const saved = localStorage.getItem('senior_care_dashboard_order');
     if (saved) {
@@ -200,7 +223,83 @@ export default function App() {
     localStorage.setItem('senior_care_documents', JSON.stringify(documents));
   }, [documents]);
 
-  // Handle Google OAuth Sign In
+  // Tab Manager Helper: Ensures clicked tab is in openTabs
+  const navigateToTab = (tab: AppTab, subTitle?: string, docType?: DocumentType) => {
+    setActiveTab(tab);
+
+    const getTabMeta = (t: AppTab): { id: string; title: string; icon: React.ReactNode } => {
+      switch (t) {
+        case 'portal':
+          return { id: 'tab-portal', title: '나의업무 (홈)', icon: <Home className="w-3.5 h-3.5 text-amber-500" /> };
+        case 'dashboard':
+          return { id: 'tab-dashboard', title: '통합 대시보드', icon: <LayoutDashboard className="w-3.5 h-3.5 text-amber-500" /> };
+        case 'clients':
+          return { id: 'tab-clients', title: '대상자 관리', icon: <Users className="w-3.5 h-3.5 text-blue-500" /> };
+        case 'ai-studio':
+          return { id: 'tab-ai-studio', title: 'AI 녹취·상담실', icon: <Sparkles className="w-3.5 h-3.5 text-amber-500" /> };
+        case 'forms':
+          return {
+            id: 'tab-forms',
+            title: docType ? DOCUMENT_TYPE_LABELS[docType].label.split('(')[0] : '10대 법정서식',
+            icon: <FileText className="w-3.5 h-3.5 text-emerald-500" />,
+          };
+        case 'insights':
+          return { id: 'tab-insights', title: '위험도·인사이트', icon: <TrendingUp className="w-3.5 h-3.5 text-teal-500" /> };
+        case 'routes':
+          return { id: 'tab-routes', title: '방문동선 지도', icon: <MapPin className="w-3.5 h-3.5 text-rose-500" /> };
+        case 'archive':
+          return { id: 'tab-archive', title: '문서 보관함', icon: <FolderCheck className="w-3.5 h-3.5 text-stone-400" /> };
+        case 'supervision':
+          return { id: 'tab-supervision', title: 'AI 수퍼비전', icon: <Bot className="w-3.5 h-3.5 text-purple-500" /> };
+        default:
+          return { id: 'tab-portal', title: '나의업무', icon: <Home className="w-3.5 h-3.5" /> };
+      }
+    };
+
+    const meta = getTabMeta(tab);
+    const existing = openTabs.find((item) => item.id === meta.id);
+
+    if (!existing) {
+      setOpenTabs((prev) => [
+        ...prev,
+        {
+          id: meta.id,
+          tab,
+          title: subTitle || meta.title,
+          icon: meta.icon,
+          closable: meta.id !== 'tab-portal',
+        },
+      ]);
+    } else if (subTitle && existing.title !== subTitle) {
+      setOpenTabs((prev) =>
+        prev.map((item) => (item.id === meta.id ? { ...item, title: subTitle } : item))
+      );
+    }
+    setActiveTabId(meta.id);
+  };
+
+  const handleSelectWorkspaceTab = (tabItem: OpenWorkspaceTab) => {
+    setActiveTab(tabItem.tab);
+    setActiveTabId(tabItem.id);
+  };
+
+  const handleCloseWorkspaceTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const remaining = openTabs.filter((t) => t.id !== tabId);
+    setOpenTabs(remaining);
+    if (activeTabId === tabId) {
+      const lastTab = remaining[remaining.length - 1] || remaining[0];
+      if (lastTab) {
+        setActiveTab(lastTab.tab);
+        setActiveTabId(lastTab.id);
+      } else {
+        setActiveTab('portal');
+        setActiveTabId('tab-portal');
+      }
+    }
+  };
+
+  // Google Sign In
   const handleSignInWithGoogle = async () => {
     try {
       const user = await googleDriveService.initiateGoogleOAuthFlow();
@@ -213,7 +312,6 @@ export default function App() {
     }
   };
 
-  // Handle Google Sign Out
   const handleSignOutGoogle = () => {
     googleDriveService.signOut();
     setGoogleUser(null);
@@ -251,7 +349,6 @@ export default function App() {
           localStorage.setItem('carebridge_last_scheduled_sync_6hour', current6HourStr);
         }
       } else {
-        // Daily scheduled check at exact HH:MM
         if (currentTimeStr === scheduledTime && lastSyncDate !== todayDateStr) {
           shouldTrigger = true;
           localStorage.setItem('carebridge_last_scheduled_sync_date', todayDateStr);
@@ -259,7 +356,6 @@ export default function App() {
       }
 
       if (shouldTrigger && !isBackingUpToDrive) {
-        console.log(`[AutoSyncScheduler] Triggering scheduled Google Drive backup at ${currentTimeStr}`);
         setIsBackingUpToDrive(true);
         try {
           const res = await googleDriveService.backupAllDataToDrive(
@@ -271,7 +367,7 @@ export default function App() {
           setLastSyncResult({
             success: res.success,
             message: res.message,
-            timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+            timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
           });
           if (res.success) {
             setDriveToast(`[정기 자동 백업 완료] Google Drive에 ${documents.length}건 서식이 안전하게 백업되었습니다.`);
@@ -285,7 +381,7 @@ export default function App() {
       }
     };
 
-    const intervalId = setInterval(checkAutoSync, 30000); // Check every 30s
+    const intervalId = setInterval(checkAutoSync, 30000);
     return () => clearInterval(intervalId);
   }, [userSettings, documents, clients, isBackingUpToDrive]);
 
@@ -302,241 +398,148 @@ export default function App() {
       setLastSyncResult({
         success: res.success,
         message: res.message,
-        timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+        timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
       });
       if (res.success) {
-        setDriveToast(res.message);
+        setDriveToast(
+          triggerType === 'auto_save'
+            ? '구글 드라이브에 자동 저장 백업되었습니다.'
+            : '구글 드라이브에 전체 사례관리 문서 백업이 완료되었습니다.'
+        );
       } else {
-        alert('백업 실패: ' + res.message);
+        setDriveToast(`백업 알림: ${res.message}`);
       }
     } catch (e: any) {
-      alert('구글 드라이브 백업 중 오류: ' + (e.message || ''));
+      setDriveToast(`백업 실패: ${e.message}`);
     } finally {
       setIsBackingUpToDrive(false);
       setTimeout(() => setDriveToast(null), 4000);
     }
   };
 
-  // Save Settings
   const handleSaveSettings = (newSettings: UserSettings) => {
     setUserSettings(newSettings);
     if (newSettings.dashboardPanelOrder) {
       setDashboardOrder(newSettings.dashboardPanelOrder);
     }
-    setDriveToast('환경설정이 성공적으로 저장되었습니다.');
+    setDriveToast('기관 및 결재 환경설정이 저장되었습니다.');
     setTimeout(() => setDriveToast(null), 3000);
   };
 
-  // Dashboard Reordering Handlers
-  const handleMoveDashboardCard = (cardId: string, direction: 'up' | 'down') => {
-    setDashboardOrder((prev) => {
-      const idx = prev.indexOf(cardId);
-      if (idx === -1) return prev;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
-      const copy = [...prev];
-      const temp = copy[idx];
-      copy[idx] = copy[targetIdx];
-      copy[targetIdx] = temp;
-      return copy;
-    });
-  };
-
-  const handleDragDropDashboardCard = (sourceId: string, targetId: string) => {
-    if (sourceId === targetId) return;
-    setDashboardOrder((prev) => {
-      const sourceIdx = prev.indexOf(sourceId);
-      const targetIdx = prev.indexOf(targetId);
-      if (sourceIdx === -1 || targetIdx === -1) return prev;
-      const copy = [...prev];
-      const [removed] = copy.splice(sourceIdx, 1);
-      copy.splice(targetIdx, 0, removed);
-      return copy;
-    });
-  };
-
-  // Panel State Handlers
-  const handleTogglePanelOpen = (panelId: string, open: boolean) => {
+  const handleTogglePanelOpen = (panelId: string, open?: boolean) => {
     setPanels((prev) => ({
       ...prev,
       [panelId]: {
         ...prev[panelId],
-        isOpen: open,
+        isOpen: open !== undefined ? open : !prev[panelId].isOpen,
+        isMinimized: false,
       },
     }));
   };
 
-  const handleTogglePanelMinimize = (panelId: string, min: boolean) => {
+  const handleTogglePanelMinimize = (panelId: string, min?: boolean) => {
     setPanels((prev) => ({
       ...prev,
       [panelId]: {
         ...prev[panelId],
-        isMinimized: min,
+        isMinimized: min !== undefined ? min : !prev[panelId].isMinimized,
       },
     }));
   };
 
   const handleResetAllPanels = () => {
     setPanels({
-      schedule: {
-        id: 'schedule',
-        name: '마감·일정 알림',
-        isOpen: true,
-        isMinimized: false,
-        icon: <BellRing className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />,
-        badgeCount: 2,
-      },
-      routes: {
-        id: 'routes',
-        name: '방문 동선 지도',
-        isOpen: true,
-        isMinimized: false,
-        icon: <MapPin className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />,
-      },
-      insights: {
-        id: 'insights',
-        name: '상담 인사이트',
-        isOpen: true,
-        isMinimized: false,
-        icon: <BrainCircuit className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />,
-      },
-      aiStudio: {
-        id: 'aiStudio',
-        name: 'AI 녹취 분석기',
-        isOpen: true,
-        isMinimized: false,
-        icon: <Sparkles className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />,
-      },
+      schedule: { id: 'schedule', name: '마감·일정 알림', isOpen: true, isMinimized: false, icon: <BellRing className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />, badgeCount: 2 },
+      riskDiagnostic: { id: 'riskDiagnostic', name: '위험도 AI 진단서', isOpen: true, isMinimized: false, icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />, badgeCount: 3 },
+      routes: { id: 'routes', name: '방문 동선 지도', isOpen: true, isMinimized: false, icon: <MapPin className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" /> },
+      insights: { id: 'insights', name: '상담 인사이트', isOpen: true, isMinimized: false, icon: <BrainCircuit className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" /> },
+      aiStudio: { id: 'aiStudio', name: 'AI 녹취 분석기', isOpen: true, isMinimized: false, icon: <Sparkles className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" /> },
     });
   };
 
-  // Push new insight to live feed from AIStudioTranscript
+  const handleAddClient = (newClient: ClientProfile) => {
+    setClients((prev) => [newClient, ...prev]);
+    const intakeDoc = createEmptyDocument('intake', newClient);
+    setDocuments((prev) => [intakeDoc, ...prev]);
+    setCurrentDocument(intakeDoc);
+    setDriveToast(`${newClient.name} 어르신이 신규 등록되었습니다.`);
+    setTimeout(() => setDriveToast(null), 3000);
+  };
+
+  const handleSaveDocument = (updatedDoc: CaseDocument) => {
+    setDocuments((prev) => {
+      const idx = prev.findIndex((d) => d.id === updatedDoc.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = updatedDoc;
+        return next;
+      }
+      return [updatedDoc, ...prev];
+    });
+    setCurrentDocument(updatedDoc);
+
+    if (googleUser && userSettings.autoBackupToDrive) {
+      handleBackupToDrive('auto_save');
+    }
+  };
+
+  const handleGeneratedDocument = (newDoc: CaseDocument) => {
+    setDocuments((prev) => [newDoc, ...prev]);
+    setCurrentDocument(newDoc);
+    const dType = newDoc.documentType || newDoc.type || 'intake';
+    navigateToTab('forms', DOCUMENT_TYPE_LABELS[dType]?.label || '서식 작성기', dType);
+    setDriveToast(`[${DOCUMENT_TYPE_LABELS[dType]?.label}] 서식이 자동 생성되어 작성기에 열렸습니다.`);
+    setTimeout(() => setDriveToast(null), 4000);
+  };
+
   const handlePushInsightToDashboard = (insight: ConsultationInsight) => {
     setLiveInsights((prev) => [insight, ...prev]);
   };
 
-  // Handler: When AI generates or fills a document
-  const handleGeneratedDocument = (newDoc: CaseDocument) => {
-    setDocuments((prev) => {
-      const idx = prev.findIndex((d) => d.id === newDoc.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = newDoc;
-        return copy;
-      }
-      return [newDoc, ...prev];
-    });
-
-    if (newDoc.clientName && !clients.some((c) => c.name === newDoc.clientName)) {
-      const autoClient: ClientProfile = {
-        id: newDoc.clientId || `client-${Date.now()}`,
-        name: newDoc.clientName,
-        birthDate: '1945-01-01',
-        age: 81,
-        gender: '여',
-        phone: '010-0000-0000',
-        emergencyContact: {
-          name: '이웃',
-          relation: '이웃/통장',
-          phone: '010-0000-0000',
-        },
-        address: '관내 재가 어르신 댁',
-        livingType: '독거노인',
-        welfareType: '기초생활수급자(생계/의료)',
-        longTermCareStatus: '등급외 B',
-        chronicDiseases: ['만성질환'],
-        riskLevel: newDoc.riskLevel || '중위험',
-        caseWorker: newDoc.author || userSettings.workerName || '이현정 사회복지사',
-        registrationDate: new Date().toISOString().slice(0, 10),
-        status: '진행중',
-        latitude: 37.5665,
-        longitude: 126.978,
-        preferredVisitDay: '수요일',
-        preferredVisitTime: '오후 2시',
-      };
-      setClients((prev) => [autoClient, ...prev]);
-    }
-
-    setCurrentDocument(newDoc);
-    setActiveTab('forms');
-
-    // Auto backup to Google Drive if enabled
-    if (userSettings.autoBackupToDrive && googleUser) {
-      googleDriveService.uploadFileToDrive(newDoc, userSettings.driveFolderName).then((res) => {
-        if (res.success) {
-          setDriveToast(`[구글드라이브 백업 완료]: ${newDoc.title}`);
-          setTimeout(() => setDriveToast(null), 3000);
-        }
-      });
-    }
-  };
-
-  // Handler: Save document from Editor
-  const handleSaveDocument = (savedDoc: CaseDocument) => {
-    setDocuments((prev) => {
-      const exists = prev.some((d) => d.id === savedDoc.id);
-      if (exists) {
-        return prev.map((d) => (d.id === savedDoc.id ? savedDoc : d));
-      }
-      return [savedDoc, ...prev];
-    });
-    setCurrentDocument(savedDoc);
-
-    // Auto-backup to Google Drive if active
-    if (userSettings.autoBackupToDrive && googleUser) {
-      googleDriveService.uploadFileToDrive(savedDoc, userSettings.driveFolderName).then((res) => {
-        if (res.success) {
-          setDriveToast(`[구글 드라이브]: ${savedDoc.title} 자동 저장됨`);
-          setTimeout(() => setDriveToast(null), 3000);
-        }
-      });
-    }
-  };
-
-  // Handler: Add new client
-  const handleAddClient = (newClient: ClientProfile) => {
-    setClients((prev) => [newClient, ...prev]);
-  };
-
-  // Handler: Select client for AI consultation
   const handleSelectClientForConsultation = (client: ClientProfile) => {
     setSelectedClientForAI(client);
     setPanels((prev) => ({
       ...prev,
       aiStudio: { ...prev.aiStudio, isOpen: true, isMinimized: false },
     }));
-    setActiveTab('ai-studio');
+    navigateToTab('ai-studio', `${client.name} 어르신 AI 상담`);
   };
 
-  // Handler: Select client for Form Editor
   const handleSelectClientForForm = (client: ClientProfile, docType?: DocumentType) => {
-    if (docType) {
-      const existingMatchingDoc = documents.find(
-        (d) => d.clientId === client.id && d.type === docType
-      );
-      if (existingMatchingDoc) {
-        setCurrentDocument(existingMatchingDoc);
-      } else {
-        setCurrentDocument(createEmptyDocument(docType, client));
-      }
+    const targetType = docType || 'intake';
+    const existingMatchingDoc = documents.find(
+      (d) => d.clientId === client.id && (d.documentType === targetType || d.type === targetType)
+    );
+    if (existingMatchingDoc) {
+      setCurrentDocument(existingMatchingDoc);
     } else {
-      const existingDoc = documents.find((d) => d.clientId === client.id);
-      if (existingDoc) {
-        setCurrentDocument(existingDoc);
-      } else {
-        setCurrentDocument(createEmptyDocument('intake', client));
-      }
+      setCurrentDocument(createEmptyDocument(targetType, client));
     }
-    setActiveTab('forms');
+    navigateToTab('forms', `${client.name} 어르신 서식`, targetType);
   };
 
-  // Handler: Open document from Archive
+  const handleSelectDocTypeFromSidebar = (docType: DocumentType) => {
+    const currentDocType = currentDocument ? (currentDocument.documentType || currentDocument.type) : 'intake';
+    if (currentDocType === docType) {
+      navigateToTab('forms', DOCUMENT_TYPE_LABELS[docType]?.label, docType);
+      return;
+    }
+    const currentClient = clients.find((c) => c.id === currentDocument?.clientId) || clients[0];
+    const existing = documents.find((d) => d.clientId === currentClient?.id && (d.documentType === docType || d.type === docType));
+    if (existing) {
+      setCurrentDocument(existing);
+    } else {
+      setCurrentDocument(createEmptyDocument(docType, currentClient));
+    }
+    navigateToTab('forms', DOCUMENT_TYPE_LABELS[docType]?.label, docType);
+  };
+
   const handleOpenDocumentFromArchive = (doc: CaseDocument) => {
     setCurrentDocument(doc);
-    setActiveTab('forms');
+    const dType = doc.documentType || doc.type || 'intake';
+    navigateToTab('forms', DOCUMENT_TYPE_LABELS[dType]?.label, dType);
   };
 
-  // Handler: Delete document
   const handleDeleteDocument = (docId: string) => {
     setDocuments((prev) => prev.filter((d) => d.id !== docId));
     if (currentDocument?.id === docId) {
@@ -545,12 +548,12 @@ export default function App() {
     }
   };
 
-  // Handler: Select document from Alert Banner
   const handleSelectDocumentFromBanner = (docId: string, clientId?: string) => {
     const doc = documents.find((d) => d.id === docId);
     if (doc) {
       setCurrentDocument(doc);
-      setActiveTab('forms');
+      const dType = doc.documentType || doc.type || 'intake';
+      navigateToTab('forms', DOCUMENT_TYPE_LABELS[dType]?.label, dType);
     } else if (clientId) {
       const client = clients.find((c) => c.id === clientId);
       if (client) {
@@ -559,22 +562,26 @@ export default function App() {
     }
   };
 
-  // Handler: Top CTA for New Consultation
+  // Big Highlight Handler: New Consultation Trigger
   const handleNewConsultation = () => {
     setSelectedClientForAI(null);
     setPanels((prev) => ({
       ...prev,
       aiStudio: { ...prev.aiStudio, isOpen: true, isMinimized: false },
     }));
-    setActiveTab('ai-studio');
+    navigateToTab('ai-studio', '신규 AI 녹취 상담');
   };
+
+  const highRiskClients = clients.filter(
+    (c) => c.riskLevel.includes('고') || c.riskLevel.includes('위험')
+  );
 
   return (
     <div className="min-h-screen bg-[#FAF7F2] dark:bg-[#14100E] text-stone-900 dark:text-stone-100 flex flex-col font-sans selection:bg-amber-200 selection:text-stone-900 transition-colors">
-      {/* Global Application Header */}
+      {/* 1. Global Top Navigation Header (희망이음 스타일 상단 대분류 헤더) */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => navigateToTab(tab)}
         clientCount={clients.length}
         docCount={documents.length}
         onNewConsultation={handleNewConsultation}
@@ -583,316 +590,280 @@ export default function App() {
         user={googleUser}
         userSettings={userSettings}
         onSignInWithGoogle={handleSignInWithGoogle}
+        onOpenMajorFormsModal={() => setIsMajorFormsModalOpen(true)}
+        onOpenNewClientModal={() => setIsNewClientModalOpen(true)}
+        onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
       />
+
+      {/* 2. MDI Workspace Multi-Tab Bar (상단 열려있는 작업 탭 표시줄) */}
+      <div className="hidden sm:block">
+        <WorkspaceTabBar
+          openTabs={openTabs}
+          activeTabId={activeTabId}
+          onSelectTab={handleSelectWorkspaceTab}
+          onCloseTab={handleCloseWorkspaceTab}
+        />
+      </div>
 
       {/* Global Notification Toast */}
       {driveToast && (
-        <div className="fixed top-20 right-6 z-50 bg-[#251F1C] text-amber-200 text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl border border-amber-500/40 flex items-center gap-2.5 animate-slide-in">
+        <div className="fixed top-24 right-6 z-50 bg-[#251F1C] text-amber-200 text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl border border-amber-500/40 flex items-center gap-2.5 animate-slide-in">
           <Cloud className="w-4 h-4 text-amber-400 shrink-0" />
           <span>{driveToast}</span>
         </div>
       )}
 
-      {/* Main Viewport Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* TAB 0: MAIN PORTAL HUB (Initial clean overview) */}
-        {activeTab === 'portal' && (
-          <MainPortalHub
-            onNavigateTab={(tab) => setActiveTab(tab)}
-            clients={clients}
-            documents={documents}
-            userSettings={userSettings}
-            onNewConsultation={handleNewConsultation}
-            onSelectClientForConsultation={handleSelectClientForConsultation}
-            onSelectClientForForm={handleSelectClientForForm}
-          />
-        )}
+      {/* 3. Main Workspace Area: Left Sidebar (세부 메뉴 대시보드) + Right Content View (작업 공간) */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Vertical Sub-Navigation Sidebar (희망이음 스타일 좌측 세로 서브메뉴) */}
+        <SubNavSidebar
+          activeTab={activeTab}
+          onNavigateTab={(tab) => {
+            navigateToTab(tab);
+            setIsMobileSidebarOpen(false);
+          }}
+          selectedDocType={currentDocument?.type || 'intake'}
+          onSelectDocType={(docType) => {
+            handleSelectDocTypeFromSidebar(docType);
+            setIsMobileSidebarOpen(false);
+          }}
+          onNewConsultation={() => {
+            handleNewConsultation();
+            setIsMobileSidebarOpen(false);
+          }}
+          onNewClientRegister={() => {
+            setIsNewClientModalOpen(true);
+            setIsMobileSidebarOpen(false);
+          }}
+          onOpenMajorFormsModal={() => {
+            setIsMajorFormsModalOpen(true);
+            setIsMobileSidebarOpen(false);
+          }}
+          clientsCount={clients.length}
+          highRiskCount={highRiskClients.length}
+          docsCount={documents.length}
+          userSettings={userSettings}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+          currentClient={clients.find((c) => c.id === currentDocument?.clientId) || clients[0]}
+          currentDocument={currentDocument}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        />
 
-        {/* TAB 1: INTEGRATED SMART DASHBOARD */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6">
-            {/* Dashboard Window Manager Bar */}
-            <DashboardManagerBar
-              panels={panels}
-              onTogglePanelOpen={handleTogglePanelOpen}
-              onTogglePanelMinimize={handleTogglePanelMinimize}
-              onResetAllPanels={handleResetAllPanels}
-              todayCount={2}
+        {/* Right Main Viewport Container (Mobile Safe Bottom Padding) */}
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-8 space-y-4 sm:space-y-6 pb-24 md:pb-8">
+          {/* TAB 0: MAIN PORTAL HUB (초기 환영 & 3대 대형 버튼 & 표준 워크플로우) */}
+          {activeTab === 'portal' && (
+            <MainPortalHub
+              onNavigateTab={(tab) => navigateToTab(tab)}
+              clients={clients}
+              documents={documents}
+              userSettings={userSettings}
+              onNewConsultation={handleNewConsultation}
+              onSelectClientForConsultation={handleSelectClientForConsultation}
+              onSelectClientForForm={handleSelectClientForForm}
+              onNewClientRegister={() => setIsNewClientModalOpen(true)}
+              onOpenMajorFormsModal={() => setIsMajorFormsModalOpen(true)}
             />
+          )}
 
-            {/* Panel 1: Schedule & Deadline Alerts */}
-            {panels.schedule?.isOpen && (
-              <ScheduleAlertBanner
-                documents={documents}
-                clients={clients}
-                onSelectClient={handleSelectClientForConsultation}
-                onSelectDocument={handleSelectDocumentFromBanner}
-                isOpen={panels.schedule.isOpen}
-                onClose={() => handleTogglePanelOpen('schedule', false)}
-              />
-            )}
-
-            {/* Quick Metrics Row */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
-                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
-                  <span>총 등록 어르신</span>
-                  <Users className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div className="text-xl font-extrabold text-stone-900 dark:text-stone-100">
-                  {clients.length} <span className="text-xs font-normal text-stone-500">명</span>
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
-                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
-                  <span>작성 사례 서식</span>
-                  <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <div className="text-xl font-extrabold text-stone-900 dark:text-stone-100">
-                  {documents.length} <span className="text-xs font-normal text-stone-500">건</span>
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
-                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
-                  <span>고위험 집중관리</span>
-                  <BellRing className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-                </div>
-                <div className="text-xl font-extrabold text-rose-600 dark:text-rose-400">
-                  {clients.filter((c) => c.riskLevel.includes('고')).length} <span className="text-xs font-normal text-stone-500">명</span>
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
-                <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
-                  <span>이번 주 방문 예정</span>
-                  <CalendarDays className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                </div>
-                <div className="text-xl font-extrabold text-teal-700 dark:text-teal-400">
-                  4 <span className="text-xs font-normal text-stone-500">가구</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Custom Reorderable Dashboard Panels Container */}
+          {/* TAB 1: INTEGRATED SMART DASHBOARD */}
+          {activeTab === 'dashboard' && (
             <div className="space-y-6">
-              {dashboardOrder.map((panelKey, idx) => {
-                const canMoveUp = idx > 0;
-                const canMoveDown = idx < dashboardOrder.length - 1;
-
-                if (panelKey === 'riskDiagnostic' && panels.riskDiagnostic?.isOpen) {
-                  return (
-                    <RiskDiagnosticCard
-                      key="riskDiagnostic"
-                      clients={clients}
-                      documents={documents}
-                      isOpen={panels.riskDiagnostic.isOpen}
-                      isMinimized={panels.riskDiagnostic.isMinimized}
-                      onToggleOpen={(open) => handleTogglePanelOpen('riskDiagnostic', open)}
-                      onToggleMinimize={(min) => handleTogglePanelMinimize('riskDiagnostic', min)}
-                      onSelectClientForAction={(client, docType) => {
-                        const targetDocType = docType || 'service_plan';
-                        const newDoc = createEmptyDocument(targetDocType, client);
-                        setCurrentDocument(newDoc);
-                        setActiveTab('form-editor');
-                      }}
-                      isDraggable={true}
-                      onMoveUp={() => handleMoveDashboardCard('riskDiagnostic', 'up')}
-                      onMoveDown={() => handleMoveDashboardCard('riskDiagnostic', 'down')}
-                      canMoveUp={canMoveUp}
-                      canMoveDown={canMoveDown}
-                      onDragStart={(e) => e.dataTransfer.setData('text/plain', 'riskDiagnostic')}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const source = e.dataTransfer.getData('text/plain');
-                        if (source) handleDragDropDashboardCard(source, 'riskDiagnostic');
-                      }}
-                    />
-                  );
-                }
-
-                if (panelKey === 'routes' && panels.routes?.isOpen) {
-                  return (
-                    <DashboardWindow
-                      key="routes"
-                      id="routes"
-                      title="어르신 댁 방문 상담 동선 최적화 & 스마트 지도 뷰"
-                      subtitle="위기도 및 실시간 지리적 인접성을 고려한 최적 경로 스케줄러"
-                      icon={<MapPin className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
-                      badge={
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300">
-                          실시간 위치 연동
-                        </span>
-                      }
-                      isOpen={panels.routes.isOpen}
-                      isMinimized={panels.routes.isMinimized}
-                      onToggleOpen={(open) => handleTogglePanelOpen('routes', open)}
-                      onToggleMinimize={(min) => handleTogglePanelMinimize('routes', min)}
-                      accentColor="rose"
-                      isDraggable={true}
-                      onMoveUp={() => handleMoveDashboardCard('routes', 'up')}
-                      onMoveDown={() => handleMoveDashboardCard('routes', 'down')}
-                      canMoveUp={canMoveUp}
-                      canMoveDown={canMoveDown}
-                      onDragStart={(e) => e.dataTransfer.setData('text/plain', 'routes')}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const source = e.dataTransfer.getData('text/plain');
-                        if (source) handleDragDropDashboardCard(source, 'routes');
-                      }}
-                    >
-                      <VisitRoutePlanner
-                        clients={clients}
-                        onSelectClientForConsultation={handleSelectClientForConsultation}
-                      />
-                    </DashboardWindow>
-                  );
-                }
-
-                if (panelKey === 'insights' && panels.insights?.isOpen) {
-                  return (
-                    <ConsultationInsightsCard
-                      key="insights"
-                      clients={clients}
-                      documents={documents}
-                      customInsights={liveInsights}
-                      isOpen={panels.insights.isOpen}
-                      isMinimized={panels.insights.isMinimized}
-                      onToggleOpen={(open) => handleTogglePanelOpen('insights', open)}
-                      onToggleMinimize={(min) => handleTogglePanelMinimize('insights', min)}
-                      isDraggable={true}
-                      onMoveUp={() => handleMoveDashboardCard('insights', 'up')}
-                      onMoveDown={() => handleMoveDashboardCard('insights', 'down')}
-                      canMoveUp={canMoveUp}
-                      canMoveDown={canMoveDown}
-                      onDragStart={(e) => e.dataTransfer.setData('text/plain', 'insights')}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const source = e.dataTransfer.getData('text/plain');
-                        if (source) handleDragDropDashboardCard(source, 'insights');
-                      }}
-                    />
-                  );
-                }
-
-                return null;
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: AI TRANSCRIPT STUDIO */}
-        {activeTab === 'ai-studio' && (
-          <div className="space-y-6">
-            <DashboardManagerBar
-              panels={panels}
-              onTogglePanelOpen={handleTogglePanelOpen}
-              onTogglePanelMinimize={handleTogglePanelMinimize}
-              onResetAllPanels={handleResetAllPanels}
-              todayCount={2}
-            />
-
-            {panels.schedule?.isOpen && (
-              <ScheduleAlertBanner
-                documents={documents}
-                clients={clients}
-                onSelectClient={handleSelectClientForConsultation}
-                onSelectDocument={handleSelectDocumentFromBanner}
-                isOpen={panels.schedule.isOpen}
-                onClose={() => handleTogglePanelOpen('schedule', false)}
+              <DashboardManagerBar
+                panels={panels}
+                onTogglePanelOpen={handleTogglePanelOpen}
+                onTogglePanelMinimize={handleTogglePanelMinimize}
+                onResetAllPanels={handleResetAllPanels}
+                todayCount={2}
               />
-            )}
 
-            {panels.aiStudio?.isOpen ? (
+              {panels.schedule?.isOpen && (
+                <ScheduleAlertBanner
+                  documents={documents}
+                  clients={clients}
+                  onSelectClient={handleSelectClientForConsultation}
+                  onSelectDocument={handleSelectDocumentFromBanner}
+                  isOpen={panels.schedule.isOpen}
+                  onClose={() => handleTogglePanelOpen('schedule', false)}
+                />
+              )}
+
+              {/* Quick Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
+                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
+                    <span>총 관리 어르신</span>
+                    <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="text-xl font-extrabold text-stone-900 dark:text-stone-100">
+                    {clients.length} <span className="text-xs font-normal text-stone-500">명</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
+                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
+                    <span>작성 법정 서식</span>
+                    <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div className="text-xl font-extrabold text-stone-900 dark:text-stone-100">
+                    {documents.length} <span className="text-xs font-normal text-stone-500">건</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
+                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
+                    <span>고위험 집중관리</span>
+                    <BellRing className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                  </div>
+                  <div className="text-xl font-extrabold text-rose-600 dark:text-rose-400">
+                    {highRiskClients.length} <span className="text-xs font-normal text-stone-500">명</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#1E1916] p-4 rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs">
+                  <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
+                    <span>금주 방문 일정</span>
+                    <CalendarDays className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  </div>
+                  <div className="text-xl font-extrabold text-teal-700 dark:text-teal-400">
+                    4 <span className="text-xs font-normal text-stone-500">가구</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cards View */}
+              <div className="space-y-6">
+                {panels.riskDiagnostic?.isOpen && (
+                  <RiskDiagnosticCard
+                    clients={clients}
+                    documents={documents}
+                    isOpen={panels.riskDiagnostic.isOpen}
+                    isMinimized={panels.riskDiagnostic.isMinimized}
+                    onToggleOpen={(open) => handleTogglePanelOpen('riskDiagnostic', open)}
+                    onToggleMinimize={(min) => handleTogglePanelMinimize('riskDiagnostic', min)}
+                    onSelectClientForAction={(client, docType) => {
+                      const targetDocType = docType || 'service_plan';
+                      const newDoc = createEmptyDocument(targetDocType, client);
+                      setCurrentDocument(newDoc);
+                      navigateToTab('forms', DOCUMENT_TYPE_LABELS[targetDocType]?.label, targetDocType);
+                    }}
+                  />
+                )}
+
+                {panels.routes?.isOpen && (
+                  <DashboardWindow
+                    id="routes"
+                    title="어르신 댁 방문 상담 동선 최적화 & 스마트 지도 뷰"
+                    subtitle="위기도 및 실시간 지리적 인접성을 고려한 최적 경로 스케줄러"
+                    icon={<MapPin className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
+                    isOpen={panels.routes.isOpen}
+                    isMinimized={panels.routes.isMinimized}
+                    onToggleOpen={(open) => handleTogglePanelOpen('routes', open)}
+                    onToggleMinimize={(min) => handleTogglePanelMinimize('routes', min)}
+                    accentColor="rose"
+                  >
+                    <VisitRoutePlanner
+                      clients={clients}
+                      onSelectClientForConsultation={handleSelectClientForConsultation}
+                    />
+                  </DashboardWindow>
+                )}
+
+                {panels.insights?.isOpen && (
+                  <ConsultationInsightsCard
+                    clients={clients}
+                    documents={documents}
+                    customInsights={liveInsights}
+                    isOpen={panels.insights.isOpen}
+                    isMinimized={panels.insights.isMinimized}
+                    onToggleOpen={(open) => handleTogglePanelOpen('insights', open)}
+                    onToggleMinimize={(min) => handleTogglePanelMinimize('insights', min)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: AI TRANSCRIPT STUDIO */}
+          {activeTab === 'ai-studio' && (
+            <div className="space-y-6">
               <AIStudioTranscript
                 clients={clients}
                 onGenerateDocument={handleGeneratedDocument}
                 selectedClient={selectedClientForAI}
                 onPushInsightToDashboard={handlePushInsightToDashboard}
               />
-            ) : (
-              <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200/80 dark:border-stone-800 p-5 shadow-xs flex items-center justify-between transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
-                    <Sparkles className="w-5 h-5 text-amber-700 dark:text-amber-400" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-stone-800 dark:text-stone-200">
-                      AI 상담 녹취 분석 창이 닫혀 있습니다.
-                    </h4>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                      음성 녹음 파일이나 텍스트를 분석하여 표준 서식을 자동 작성하려면 창을 열어주세요.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleTogglePanelOpen('aiStudio', true)}
-                  className="px-3.5 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold transition-colors cursor-pointer"
-                >
-                  창 열기
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* TAB 3: CASE MANAGEMENT FORMS */}
-        {activeTab === 'forms' && (
-          <FormEditor
-            currentDocument={currentDocument}
-            clients={clients}
-            userSettings={userSettings}
-            onSaveDocument={handleSaveDocument}
-          />
-        )}
+          {/* TAB 3: 10 STANDARD FORMS EDITOR */}
+          {activeTab === 'forms' && (
+            <FormEditor
+              currentDocument={currentDocument}
+              clients={clients}
+              userSettings={userSettings}
+              onSaveDocument={handleSaveDocument}
+            />
+          )}
 
-        {/* TAB 4: VISIT ROUTE MAP */}
-        {activeTab === 'routes' && (
-          <VisitRoutePlanner
-            clients={clients}
-            onSelectClientForConsultation={handleSelectClientForConsultation}
-          />
-        )}
+          {/* TAB 4: VISIT ROUTE MAP */}
+          {activeTab === 'routes' && (
+            <VisitRoutePlanner
+              clients={clients}
+              onSelectClientForConsultation={handleSelectClientForConsultation}
+            />
+          )}
 
-        {/* TAB 5: CONSULTATION INSIGHTS */}
-        {activeTab === 'insights' && (
-          <ConsultationInsightsCard
-            clients={clients}
-            documents={documents}
-            customInsights={liveInsights}
-            isOpen={true}
-          />
-        )}
+          {/* TAB 5: RISK & CONSULTATION INSIGHTS */}
+          {activeTab === 'insights' && (
+            <div className="space-y-6">
+              <RiskDiagnosticCard
+                clients={clients}
+                documents={documents}
+                isOpen={true}
+                onSelectClientForAction={(client, docType) => {
+                  const targetDocType = docType || 'service_plan';
+                  const newDoc = createEmptyDocument(targetDocType, client);
+                  setCurrentDocument(newDoc);
+                  navigateToTab('forms', DOCUMENT_TYPE_LABELS[targetDocType]?.label, targetDocType);
+                }}
+              />
+              <ConsultationInsightsCard
+                clients={clients}
+                documents={documents}
+                customInsights={liveInsights}
+                isOpen={true}
+              />
+            </div>
+          )}
 
-        {/* TAB 6: CLIENTS MANAGEMENT */}
-        {activeTab === 'clients' && (
-          <ClientList
-            clients={clients}
-            onAddClient={handleAddClient}
-            onSelectClientForConsultation={handleSelectClientForConsultation}
-            onSelectClientForForm={handleSelectClientForForm}
-          />
-        )}
+          {/* TAB 6: CLIENTS MANAGEMENT */}
+          {activeTab === 'clients' && (
+            <ClientList
+              clients={clients}
+              onAddClient={handleAddClient}
+              onSelectClientForConsultation={handleSelectClientForConsultation}
+              onSelectClientForForm={handleSelectClientForForm}
+            />
+          )}
 
-        {/* TAB 7: ARCHIVE */}
-        {activeTab === 'archive' && (
-          <DocumentArchive
-            documents={documents}
-            onOpenDocument={handleOpenDocumentFromArchive}
-            onDeleteDocument={handleDeleteDocument}
-          />
-        )}
+          {/* TAB 7: ARCHIVE */}
+          {activeTab === 'archive' && (
+            <DocumentArchive
+              documents={documents}
+              onOpenDocument={handleOpenDocumentFromArchive}
+              onDeleteDocument={handleDeleteDocument}
+            />
+          )}
 
-        {/* TAB 8: SUPERVISION */}
-        {activeTab === 'supervision' && (
-          <SupervisionAdvisor clients={clients} />
-        )}
-      </main>
+          {/* TAB 8: SUPERVISION */}
+          {activeTab === 'supervision' && (
+            <SupervisionAdvisor clients={clients} />
+          )}
+        </main>
+      </div>
 
       {/* Global Settings & Preferences Modal */}
       <SettingsModal
@@ -911,7 +882,7 @@ export default function App() {
         }}
       />
 
-      {/* Cloud Auto Sync Scheduler & Push Notifications Modal */}
+      {/* Cloud Auto Sync Scheduler Modal */}
       <AutoSyncSchedulerModal
         isOpen={isSchedulerModalOpen}
         onClose={() => setIsSchedulerModalOpen(false)}
@@ -923,20 +894,48 @@ export default function App() {
         isSyncing={isBackingUpToDrive}
       />
 
-      {/* Footer */}
-      <footer className="bg-[#231E1B] border-t border-[#38302B] text-stone-400 text-xs py-4 print:hidden transition-colors">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-amber-200">케어브릿지 (CareBridge)</span>
-            <span className="text-stone-500">|</span>
-            <span>{userSettings.institutionName || '재가노인지원서비스 스마트 사례관리 AI 시스템'}</span>
-          </div>
-          <div className="text-stone-400">
-            보건복지부 노인보건복지사업안내 표준 7대 서식 준수 • Gemini 3.7 Flash
-          </div>
-        </div>
-      </footer>
+      {/* New Client Registration Modal (신규 어르신 등록 모달) */}
+      <NewClientModal
+        isOpen={isNewClientModalOpen}
+        onClose={() => setIsNewClientModalOpen(false)}
+        onSaveClient={(newClient) => {
+          handleAddClient(newClient);
+        }}
+        onStartAIConsultation={(newClient) => {
+          handleAddClient(newClient);
+          handleSelectClientForConsultation(newClient);
+        }}
+        onStartIntakeForm={(newClient) => {
+          handleAddClient(newClient);
+          handleSelectClientForForm(newClient, 'intake');
+        }}
+      />
+
+      {/* Major Legal Forms Quick Modal Launcher (주요 법정 서식 빠른 런처 모달) */}
+      <MajorFormsQuickModal
+        isOpen={isMajorFormsModalOpen}
+        onClose={() => setIsMajorFormsModalOpen(false)}
+        clients={clients}
+        onSelectForm={(docType, targetClient) => {
+          const client = targetClient || clients[0];
+          handleSelectClientForForm(client, docType);
+        }}
+      />
+
+      {/* Mobile Bottom Navigation Bar (스마트폰 & 태블릿 최적화 하단 바) */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        onNavigateTab={(tab) => navigateToTab(tab)}
+        onNewConsultation={handleNewConsultation}
+        onOpenNewClientModal={() => setIsNewClientModalOpen(true)}
+        onOpenMajorFormsModal={() => setIsMajorFormsModalOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenScheduler={() => setIsSchedulerModalOpen(true)}
+        user={googleUser}
+        userSettings={userSettings}
+        clientsCount={clients.length}
+        docsCount={documents.length}
+      />
     </div>
   );
 }
-

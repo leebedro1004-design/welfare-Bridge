@@ -161,6 +161,7 @@ export interface CaseDocument {
   clientId: string;
   clientName: string;
   documentType: DocumentType;
+  type?: DocumentType;
   title: string;
   createdAt: string;
   updatedAt: string;

@@ -254,18 +254,38 @@ export const ClientList: React.FC<ClientListProps> = ({
 
                 {/* Info List */}
                 <div className="space-y-2 text-xs text-stone-600 bg-stone-50/70 p-3 rounded-xl border border-stone-100">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-                    <span className="truncate">{client.address}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 truncate">
+                      <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                      <span className="truncate">{client.address}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-stone-400 shrink-0" />
-                    <span>{client.phone}</span>
-                    <span className="text-stone-400">|</span>
-                    <span className="text-[11px] text-stone-500 truncate">
-                      비상: {client.emergencyContact.name} ({client.emergencyContact.phone})
-                    </span>
+
+                  <div className="flex items-center justify-between gap-1 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                      <a
+                        href={`tel:${client.phone}`}
+                        className="text-blue-600 dark:text-blue-400 hover:underline font-bold"
+                        title="전화 걸기"
+                      >
+                        {client.phone}
+                      </a>
+                    </div>
+                    {client.emergencyContact?.phone && (
+                      <div className="flex items-center gap-1 text-[11px] text-stone-500">
+                        <span>비상({client.emergencyContact.relation}):</span>
+                        <a
+                          href={`tel:${client.emergencyContact.phone}`}
+                          className="text-rose-600 dark:text-rose-400 hover:underline font-semibold"
+                          title="비상연락처 전화 걸기"
+                        >
+                          {client.emergencyContact.phone}
+                        </a>
+                      </div>
+                    )}
                   </div>
+
                   <div className="flex items-center gap-2">
                     <ShieldAlert className="w-3.5 h-3.5 text-stone-400 shrink-0" />
                     <span className="font-semibold text-amber-900">
