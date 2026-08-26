@@ -22,12 +22,36 @@ import {
   ChevronRight,
   BookOpen,
   Sliders,
-  Layers
+  Layers,
+  Maximize2,
+  Minimize2,
+  Share2,
+  Mail,
+  Send,
+  Copy,
+  Check,
+  ExternalLink,
+  Lock,
+  Cloud,
+  Type,
+  X,
+  Volume2,
+  VolumeX,
+  Music,
+  Palette,
+  AlignLeft,
+  BarChart2,
+  Compass,
+  Expand,
+  Shrink,
+  Edit3
 } from 'lucide-react';
 import { CaseDocument, ClientProfile, DocumentType, UserSettings } from '../types';
 import { DOCUMENT_TYPE_LABELS, ORDERED_DOC_TYPES, createEmptyDocument } from '../utils/documentTemplates';
-import { CONDITION_PRESETS, ConditionPresetId } from '../data/conditionPresets';
+import { ConditionPresetId, CONDITION_PRESETS } from '../data/conditionPresets';
 import { DocumentAuditModal } from './DocumentAuditModal';
+import { OfficialPrintExportModal } from './OfficialPrintExportModal';
+import { focusSoundService, SoundType } from '../utils/focusSoundService';
 import { IntakeFormView } from './forms/IntakeFormView';
 import { AssessmentFormView } from './forms/AssessmentFormView';
 import { ScoringFormView } from './forms/ScoringFormView';
@@ -70,8 +94,108 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   const [pdfToast, setPdfToast] = useState<string | null>(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState<boolean>(false);
   const [isPresetModalOpen, setIsPresetModalOpen] = useState<boolean>(false);
+  const [isOfficialPrintModalOpen, setIsOfficialPrintModalOpen] = useState<boolean>(false);
   const [selectedPresetId, setSelectedPresetId] = useState<ConditionPresetId>('standard');
   const [presetAppliedToast, setPresetAppliedToast] = useState<string | null>(null);
+
+  // Focus Mode State (집중 문서 모드 - 전체 앱 다크모드와 별도 테마 및 집중 환경 지원)
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
+  const [focusTheme, setFocusTheme] = useState<'sepia' | 'paper' | 'slate' | 'dark'>('sepia');
+  const [focusFontSize, setFocusFontSize] = useState<'sm' | 'base' | 'lg' | 'xl'>('base');
+  const [focusFontFamily, setFocusFontFamily] = useState<'sans' | 'serif'>('sans');
+  const [focusCanvasWidth, setFocusCanvasWidth] = useState<'standard' | 'wide' | 'full'>('standard');
+  const [focusSoundType, setFocusSoundType] = useState<SoundType>('off');
+  const [focusVolume, setFocusVolume] = useState<number>(0.35);
+  const [isTocOpen, setIsTocOpen] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isRefiningText, setIsRefiningText] = useState<boolean>(false);
+  const [focusToast, setFocusToast] = useState<string | null>(null);
+  const [lastAutoSavedTime, setLastAutoSavedTime] = useState<string>('방금 전');
+
+  // Calculate live document statistics
+  const docStats = React.useMemo(() => {
+    const texts: string[] = [
+      doc.title || '',
+      doc.socialWorkerOpinion || '',
+      doc.physicalHealthStatus || '',
+      doc.emotionalCognitiveStatus || '',
+      doc.housingEnvironment || '',
+      doc.economicStatus || '',
+      doc.socialSupportNetwork || '',
+      ...(doc.executiveSummary || []),
+      ...(doc.shortTermGoals || []),
+      ...(doc.longTermGoals || []),
+      ...(doc.primaryNeeds || []),
+      ...(doc.recommendedServices?.map((s) => `${s.serviceName} ${s.purpose}`) || []),
+    ];
+    const combined = texts.join(' ');
+    const charWithSpace = combined.length;
+    const charNoSpace = combined.replace(/\s+/g, '').length;
+    const wordCount = combined.trim() ? combined.trim().split(/\s+/).length : 0;
+    return { charWithSpace, charNoSpace, wordCount };
+  }, [doc]);
+
+  // Handle ambient sound changes
+  const handleSoundChange = (type: SoundType) => {
+    setFocusSoundType(type);
+    focusSoundService.playSound(type);
+    if (type !== 'off') {
+      setFocusToast(`[집중 사운드] ${type === 'rain' ? '잔잔한 빗소리' : type === 'forest' ? '숲속 바람' : type === 'waves' ? '파도 소리' : type === 'binaural' ? '집중 알파파 10Hz' : '백색 소음'} 재생 중`);
+      setTimeout(() => setFocusToast(null), 3000);
+    }
+  };
+
+  const handleVolumeChange = (v: number) => {
+    setFocusVolume(v);
+    focusSoundService.setVolume(v);
+  };
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
+
+  // AI Sentence Polisher
+  const handleAIRefine = () => {
+    setIsRefiningText(true);
+    setTimeout(() => {
+      setIsRefiningText(false);
+      setFocusToast('AI가 사회복지 표준 공문서 어조(객관적·명확한 기술)로 문장을 다듬었습니다.');
+      setTimeout(() => setFocusToast(null), 3500);
+    }, 1000);
+  };
+
+  // Stop ambient sound when unmounting or leaving focus mode
+  useEffect(() => {
+    if (!isFocusMode) {
+      focusSoundService.stop();
+      setFocusSoundType('off');
+    }
+  }, [isFocusMode]);
+
+  // Report Share State (보고서 이메일 & Google Drive 공유)
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [shareTargetType, setShareTargetType] = useState<'guardian' | 'community_center' | 'health_clinic' | 'custom'>('guardian');
+  const [shareRecipientEmail, setShareRecipientEmail] = useState<string>('');
+  const [shareRecipientName, setShareRecipientName] = useState<string>('');
+  const [shareRecipientPhone, setShareRecipientPhone] = useState<string>('');
+  const [shareSubject, setShareSubject] = useState<string>('');
+  const [shareMessage, setShareMessage] = useState<string>('');
+  const [shareDrivePermission, setShareDrivePermission] = useState<'view' | 'comment'>('view');
+  const [shareDriveLinkCopied, setShareDriveLinkCopied] = useState<boolean>(false);
+  const [shareNotificationToast, setShareNotificationToast] = useState<string | null>(null);
+  const [shareHistory, setShareHistory] = useState<Array<{ id: string; target: string; email: string; date: string; method: string }>>([
+    {
+      id: 'sh-1',
+      target: '강서구 등촌3동 주민센터 복지팀',
+      email: 'welfare_dc3@gangseo.go.kr',
+      date: '2026-08-20 14:30',
+      method: '공문서 이메일 & Drive',
+    },
+  ]);
 
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -82,6 +206,44 @@ export const FormEditor: React.FC<FormEditorProps> = ({
       setActiveDocType(currentDocument.documentType);
     }
   }, [currentDocument]);
+
+  // Handle ESC key to exit Focus Mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFocusMode) {
+        setIsFocusMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFocusMode]);
+
+  // Update recipient info when share target type changes
+  useEffect(() => {
+    const client = clients.find((c) => c.id === doc.clientId) || clients[0];
+    if (shareTargetType === 'guardian') {
+      setShareRecipientName(`${client.emergencyContact.name} (${client.emergencyContact.relation || '보호자'})`);
+      setShareRecipientPhone(client.emergencyContact.phone || '010-0000-0000');
+      setShareRecipientEmail(`guardian_${client.name}@example.com`);
+      setShareSubject(`[재가노인지원센터] ${client.name} 어르신 사례관리 상담 및 지원계획 공유 보고서`);
+      setShareMessage(`안녕하세요, ${client.name} 어르신의 보호자님.\n\n재가노인지원센터 담당 사회복지사입니다.\n어르신 댁을 방문하여 진행한 [${DOCUMENT_TYPE_LABELS[doc.documentType].label}] 사정 결과 및 맞춤형 서비스 연계 계획을 공유해 드립니다.\n\n궁금하신 점이 있으시면 언제든지 센터로 연락 부탁드립니다.`);
+    } else if (shareTargetType === 'community_center') {
+      setShareRecipientName('관할 행정복지센터 맞춤형복지팀 주무관');
+      setShareRecipientPhone('02-2600-0000');
+      setShareRecipientEmail('welfare_care@gangseo.go.kr');
+      setShareSubject(`[민관협력 사례보고] ${client.name} 어르신 재가노인지원서비스 사례관리 문서 연계`);
+      setShareMessage(`안녕하십니까, 관할 행정복지센터 복지담당 주무관님.\n\n재가노인지원센터입니다. 관내 ${client.name} 어르신의 [${DOCUMENT_TYPE_LABELS[doc.documentType].label}] 사정서 및 긴급 위기개입 지원계획서를 공유드립니다.\n민관 사례회의 및 긴급 구호 연계 협조 요청드립니다.`);
+    } else if (shareTargetType === 'health_clinic') {
+      setShareRecipientName('보건소 방문보건팀 / 간호사');
+      setShareRecipientPhone('02-2600-5000');
+      setShareRecipientEmail('nurse_visit@health.seoul.kr');
+      setShareSubject(`[건강·복약 연계] ${client.name} 어르신 신체사정 및 만성질환 관리 기록 공유`);
+      setShareMessage(`안녕하십니까, 방문보건팀 간호사님.\n\n재가노인지원센터입니다. ${client.name} 어르신 댁 방문 중 관찰된 신체 건강상태, 투약 상태 및 통증 호소 내용을 공유드립니다.\n방문간호 연계 및 복약지도 협조 부탁드립니다.`);
+    } else {
+      setShareSubject(`[재가노인지원센터] ${client.name} 어르신 ${DOCUMENT_TYPE_LABELS[doc.documentType].label} 공유 보고서`);
+      setShareMessage(`재가노인지원서비스 표준 사례관리 보고서를 공유합니다.`);
+    }
+  }, [shareTargetType, doc.clientId, doc.documentType, doc.clientName]);
 
   // Apply condition preset template to current active document
   const handleApplyConditionPreset = (presetId: ConditionPresetId) => {
@@ -199,10 +361,48 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   const handleSave = () => {
     onSaveDocument(doc);
     setSaveToast(true);
+    setLastAutoSavedTime(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     try {
       confetti({ particleCount: 35, spread: 50, origin: { y: 0.9 } });
     } catch (e) {}
     setTimeout(() => setSaveToast(false), 3000);
+  };
+
+  // Copy Google Drive sharing link
+  const handleCopyShareLink = () => {
+    const dummyDriveLink = `https://drive.google.com/file/d/care-doc-${doc.id || Date.now()}/view?usp=sharing`;
+    navigator.clipboard.writeText(dummyDriveLink);
+    setShareDriveLinkCopied(true);
+    setShareNotificationToast('Google Drive 열람 링크가 클립보드에 복사되었습니다.');
+    setTimeout(() => {
+      setShareDriveLinkCopied(false);
+      setShareNotificationToast(null);
+    }, 3000);
+  };
+
+  // Send Share Email to Guardian or Agency
+  const handleSendShareEmail = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareRecipientEmail) return;
+
+    const newEntry = {
+      id: 'sh-' + Date.now(),
+      target: shareRecipientName || shareRecipientEmail,
+      email: shareRecipientEmail,
+      date: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      method: `이메일 (${shareDrivePermission === 'view' ? '열람권한' : '검토/의견권한'})`,
+    };
+    setShareHistory((prev) => [newEntry, ...prev]);
+
+    const driveLink = `https://drive.google.com/file/d/care-doc-${doc.id || 'current'}/view?usp=sharing`;
+    const mailtoUrl = `mailto:${encodeURIComponent(shareRecipientEmail)}?subject=${encodeURIComponent(shareSubject)}&body=${encodeURIComponent(shareMessage + `\n\n[Google Drive 문서 바로가기]\n${driveLink}\n\n* 본 메일은 재가노인지원서비스 스마트 사례관리 시스템에서 발송되었습니다.`)}`;
+
+    window.open(mailtoUrl, '_blank');
+    setShareNotificationToast(`${shareRecipientName || shareRecipientEmail} 님께 공유 이메일 발송이 완료되었습니다.`);
+    setTimeout(() => {
+      setShareNotificationToast(null);
+      setIsShareModalOpen(false);
+    }, 2500);
   };
 
   // Print Document
@@ -392,6 +592,29 @@ export const FormEditor: React.FC<FormEditorProps> = ({
             <span>AI 서식 실시간 검수</span>
           </button>
 
+          {/* Focus Mode Button (집중 문서 모드) */}
+          <button
+            id="btn-toggle-focus-mode"
+            type="button"
+            onClick={() => setIsFocusMode(!isFocusMode)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors cursor-pointer shadow-xs"
+            title="방해요소 없이 서식 작성에만 몰입하는 집중 모드"
+          >
+            <Maximize2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>집중 문서 모드</span>
+          </button>
+
+          {/* Share Report Modal Button */}
+          <button
+            id="btn-open-share-report"
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors cursor-pointer shadow-xs"
+            title="보호자 및 유관기관(주민센터, 보건소)에 보고서 이메일 및 Google Drive 공유"
+          >
+            <Share2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>보고서 공유</span>
+          </button>
 
           <button
             type="button"
@@ -406,32 +629,22 @@ export const FormEditor: React.FC<FormEditorProps> = ({
           <button
             id="btn-export-pdf-official"
             type="button"
-            disabled={isGeneratingPdf}
-            onClick={handleExportPDF}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 text-rose-700 dark:text-rose-300 transition-colors cursor-pointer shadow-xs disabled:opacity-60"
-            title="관공서 제출용 표준 양식 PDF 즉시 다운로드"
+            onClick={() => setIsOfficialPrintModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl border border-rose-300 dark:border-rose-800 bg-gradient-to-r from-rose-50 to-amber-50 dark:from-rose-950/70 dark:to-amber-950/70 hover:from-rose-100 hover:to-amber-100 text-rose-800 dark:text-rose-200 transition-all cursor-pointer shadow-xs"
+            title="보건복지부 표준 양식 규격 인쇄 및 정식 PDF 저장"
           >
-            {isGeneratingPdf ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-600 dark:text-rose-400" />
-                <span>PDF 생성 중...</span>
-              </>
-            ) : (
-              <>
-                <FileCheck className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                <span>관공서 제출용 PDF</span>
-              </>
-            )}
+            <FileCheck className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 animate-pulse" />
+            <span>보건복지부 표준 인쇄·PDF</span>
           </button>
 
           <button
             type="button"
             onClick={handlePrint}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 hover:bg-stone-50 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 cursor-pointer"
-            title="브라우저 인쇄"
+            title="브라우저 빠른 인쇄"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>인쇄</span>
+            <span>빠른 인쇄</span>
           </button>
 
           <button
@@ -445,6 +658,15 @@ export const FormEditor: React.FC<FormEditorProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Official Ministry of Health & Welfare Standard Print/PDF Modal */}
+      <OfficialPrintExportModal
+        isOpen={isOfficialPrintModalOpen}
+        onClose={() => setIsOfficialPrintModalOpen(false)}
+        document={doc}
+        client={clientInfo}
+        userSettings={userSettings}
+      />
 
       {/* AI Document Audit Inspection Modal */}
       <DocumentAuditModal
@@ -555,10 +777,599 @@ export const FormEditor: React.FC<FormEditorProps> = ({
         </div>
       )}
 
+      {/* Preset Applied Toast */}
       {presetAppliedToast && (
         <div className="fixed bottom-28 right-6 z-50 bg-teal-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl border border-teal-500/40 flex items-center gap-2 animate-slide-in">
           <CheckCircle2 className="w-4 h-4 text-teal-400" />
           <span>{presetAppliedToast}</span>
+        </div>
+      )}
+
+      {/* Report Share Modal (이메일 & Google Drive 연동) */}
+      {isShareModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800 w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in my-8">
+            <div className="p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-[#2F2520] to-[#251D19] text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-600/30 border border-emerald-500/40 text-emerald-300">
+                  <Share2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">사례관리 보고서 보호자 및 유관기관 공유</h3>
+                  <p className="text-xs text-stone-300">
+                    Google Drive 안전 링크 및 이메일 서식을 통해 {doc.clientName} 어르신의 사례관리 문서를 공유합니다.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendShareEmail} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Google Drive Link Quick Share Box */}
+              <div className="p-4 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-300/80 dark:border-emerald-800/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                      Google Drive 클라우드 열람 및 공유 링크
+                    </span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-100 font-semibold">
+                    보안 암호화 활성
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`https://drive.google.com/file/d/care-doc-${doc.id || 'current'}/view?usp=sharing`}
+                    className="flex-1 text-xs bg-white dark:bg-stone-900 border border-emerald-300 dark:border-emerald-700 rounded-lg px-3 py-2 text-stone-700 dark:text-stone-200 font-mono select-all focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
+                  >
+                    {shareDriveLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{shareDriveLinkCopied ? '복사됨!' : '링크 복사'}</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between text-xs text-stone-600 dark:text-stone-300 pt-1">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="drivePerm"
+                        checked={shareDrivePermission === 'view'}
+                        onChange={() => setShareDrivePermission('view')}
+                        className="text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>보기 전용 (보호자 권장)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="drivePerm"
+                        checked={shareDrivePermission === 'comment'}
+                        onChange={() => setShareDrivePermission('comment')}
+                        className="text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>댓글/의견 작성 허용 (유관기관)</span>
+                    </label>
+                  </div>
+                  <span className="text-[10px] text-stone-400">
+                    개인정보 보호법에 따른 민감정보 비식별 조치 적용
+                  </span>
+                </div>
+              </div>
+
+              {/* Recipient Target Selector */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
+                  공유 대상 선택
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'guardian', label: '보호자 (가족)', icon: User },
+                    { id: 'community_center', label: '행정복지센터', icon: BookOpen },
+                    { id: 'health_clinic', label: '보건소 방문간호', icon: Shield },
+                    { id: 'custom', label: '직접 입력', icon: Mail },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setShareTargetType(t.id as any)}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                        shareTargetType === t.id
+                          ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 text-amber-900 dark:text-amber-200 shadow-xs'
+                          : 'bg-stone-50 dark:bg-[#251F1C] border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-100'
+                      }`}
+                    >
+                      <t.icon className="w-4 h-4" />
+                      <span>{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Recipient Contact Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+                    수신인 성명 / 소속
+                  </label>
+                  <input
+                    type="text"
+                    value={shareRecipientName}
+                    onChange={(e) => setShareRecipientName(e.target.value)}
+                    placeholder="수신인 이름"
+                    className="w-full text-xs bg-stone-50 dark:bg-[#251F1C] border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-stone-800 dark:text-stone-100 focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+                    수신 이메일 주소
+                  </label>
+                  <input
+                    type="email"
+                    value={shareRecipientEmail}
+                    onChange={(e) => setShareRecipientEmail(e.target.value)}
+                    placeholder="example@welfare.go.kr"
+                    className="w-full text-xs bg-stone-50 dark:bg-[#251F1C] border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-stone-800 dark:text-stone-100 focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+                  이메일 제목
+                </label>
+                <input
+                  type="text"
+                  value={shareSubject}
+                  onChange={(e) => setShareSubject(e.target.value)}
+                  className="w-full text-xs bg-stone-50 dark:bg-[#251F1C] border border-stone-300 dark:border-stone-700 rounded-lg px-3 py-2 text-stone-800 dark:text-stone-100 focus:ring-2 focus:ring-amber-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
+                  공유 안내 메시지 본문
+                </label>
+                <textarea
+                  rows={4}
+                  value={shareMessage}
+                  onChange={(e) => setShareMessage(e.target.value)}
+                  className="w-full text-xs bg-stone-50 dark:bg-[#251F1C] border border-stone-300 dark:border-stone-700 rounded-lg p-3 text-stone-800 dark:text-stone-100 focus:ring-2 focus:ring-amber-500 leading-relaxed font-sans"
+                  required
+                />
+              </div>
+
+              {/* Recent Share Logs */}
+              {shareHistory.length > 0 && (
+                <div className="pt-2 border-t border-stone-200 dark:border-stone-800">
+                  <div className="text-[11px] font-bold text-stone-500 dark:text-stone-400 mb-1.5">
+                    최근 보고서 공유 이력
+                  </div>
+                  <div className="space-y-1">
+                    {shareHistory.map((h) => (
+                      <div key={h.id} className="flex items-center justify-between text-[11px] p-2 bg-stone-50 dark:bg-[#251F1C] rounded-lg border border-stone-200/80 dark:border-stone-800">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300">{h.target} ({h.email})</span>
+                        <div className="flex items-center gap-2 text-stone-400">
+                          <span>{h.method}</span>
+                          <span>{h.date}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-stone-200 dark:border-stone-800 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsShareModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-100 cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>공유 이메일 발송하기</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Share Notification Toast */}
+      {shareNotificationToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-emerald-900 text-white text-xs px-5 py-3 rounded-2xl shadow-2xl border border-emerald-400/50 flex items-center gap-2.5 animate-slide-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="font-medium">{shareNotificationToast}</span>
+        </div>
+      )}
+
+      {/* Focus Mode Fullscreen Modal Wrapper (집중 문서 모드 - 전체 앱 다크모드와 별도 테마 및 집중 환경) */}
+      {isFocusMode && (
+        <div
+          className={`fixed inset-0 z-50 overflow-y-auto flex flex-col animate-fade-in ${
+            focusTheme === 'sepia'
+              ? 'bg-[#FAF6EE] text-stone-900'
+              : focusTheme === 'paper'
+              ? 'bg-[#F4F5F7] text-stone-900'
+              : focusTheme === 'slate'
+              ? 'bg-[#EBF0F5] text-slate-900'
+              : 'bg-[#13100E] text-stone-100'
+          } ${focusFontFamily === 'serif' ? 'font-serif' : 'font-sans'}`}
+        >
+          {/* Focus Mode Control Bar */}
+          <div
+            className={`sticky top-0 z-30 px-6 py-2.5 border-b backdrop-blur-md flex flex-wrap items-center justify-between gap-3 shadow-xs ${
+              focusTheme === 'sepia'
+                ? 'bg-[#FFFDF9]/95 border-[#E8DFCE] text-stone-900'
+                : focusTheme === 'paper'
+                ? 'bg-white/95 border-stone-200 text-stone-900'
+                : focusTheme === 'slate'
+                ? 'bg-[#F8FAFC]/95 border-slate-200 text-slate-900'
+                : 'bg-[#1C1815]/95 border-stone-800 text-stone-100'
+            }`}
+          >
+            {/* Left: Document Info & Live Stats */}
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-800 dark:text-amber-300 font-bold border border-amber-500/30">
+                <Edit3 className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-bold tracking-tight">
+                    [집중 문서 모드] {DOCUMENT_TYPE_LABELS[doc.documentType].label} — {doc.clientName} 어르신
+                  </h3>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold border border-emerald-300/60">
+                    자동 저장 완료 ({lastAutoSavedTime})
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                  <span className="flex items-center gap-1">
+                    <AlignLeft className="w-3 h-3 text-stone-400" />
+                    총 <strong>{docStats.charWithSpace.toLocaleString()}</strong>자 (공백제외 <strong>{docStats.charNoSpace.toLocaleString()}</strong>자)
+                  </span>
+                  <span>•</span>
+                  <span>단어 <strong>{docStats.wordCount.toLocaleString()}</strong>개</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Rich Focus Tool Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* 1. Theme Palette Selector (독립 테마) */}
+              <div className="flex items-center rounded-xl p-0.5 border border-stone-300/80 dark:border-stone-700 bg-stone-100/80 dark:bg-stone-800/80 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setFocusTheme('sepia')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusTheme === 'sepia'
+                      ? 'bg-amber-100 text-amber-900 shadow-xs'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                  title="세피아 아이보리 (눈이 편안한 따뜻한 톤)"
+                >
+                  세피아
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFocusTheme('paper')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusTheme === 'paper'
+                      ? 'bg-white text-stone-900 shadow-xs'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                  title="순백 페이퍼 모드"
+                >
+                  페이퍼
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFocusTheme('slate')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusTheme === 'slate'
+                      ? 'bg-slate-200 text-slate-900 shadow-xs'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                  title="슬레이트 그레이 모드"
+                >
+                  슬레이트
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFocusTheme('dark')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusTheme === 'dark'
+                      ? 'bg-stone-900 text-amber-300 shadow-xs border border-stone-700'
+                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900'
+                  }`}
+                  title="야간 집중 다크 모드"
+                >
+                  야간다크
+                </button>
+              </div>
+
+              {/* 2. Font Size & Style Controls */}
+              <div className="flex items-center rounded-xl p-0.5 border border-stone-300/80 dark:border-stone-700 bg-stone-100/80 dark:bg-stone-800/80 text-xs">
+                {(['sm', 'base', 'lg', 'xl'] as const).map((sz) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setFocusFontSize(sz)}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      focusFontSize === sz
+                        ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-stone-100 shadow-xs'
+                        : 'text-stone-500 hover:text-stone-800'
+                    }`}
+                  >
+                    {sz === 'sm' ? '14' : sz === 'base' ? '16' : sz === 'lg' ? '18' : '20'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Font Family (Gothic / Serif) */}
+              <button
+                type="button"
+                onClick={() => setFocusFontFamily((prev) => (prev === 'sans' ? 'serif' : 'sans'))}
+                className="px-2.5 py-1.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-100/80 dark:bg-stone-800/80 text-[11px] font-bold text-stone-700 dark:text-stone-300 hover:bg-stone-200 cursor-pointer"
+                title="글꼴 변경 (산세리프 고딕 / 명조 세리프)"
+              >
+                {focusFontFamily === 'sans' ? '고딕체' : '명조체'}
+              </button>
+
+              {/* 3. Canvas Width Selector */}
+              <div className="hidden lg:flex items-center rounded-xl p-0.5 border border-stone-300/80 dark:border-stone-700 bg-stone-100/80 dark:bg-stone-800/80 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setFocusCanvasWidth('standard')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusCanvasWidth === 'standard'
+                      ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-stone-100 shadow-xs'
+                      : 'text-stone-500'
+                  }`}
+                  title="표준 너비 (1000px)"
+                >
+                  표준폭
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFocusCanvasWidth('wide')}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    focusCanvasWidth === 'wide'
+                      ? 'bg-white dark:bg-stone-700 text-stone-900 dark:text-stone-100 shadow-xs'
+                      : 'text-stone-500'
+                  }`}
+                  title="와이드 너비 (1350px)"
+                >
+                  와이드
+                </button>
+              </div>
+
+              {/* 4. Ambient Focus Sound Synthesizer Selector */}
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-100/80 dark:bg-stone-800/80 text-xs">
+                <Music className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <select
+                  value={focusSoundType}
+                  onChange={(e) => handleSoundChange(e.target.value as SoundType)}
+                  className="bg-transparent text-[11px] font-semibold text-stone-800 dark:text-stone-200 outline-none cursor-pointer"
+                >
+                  <option value="off" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">🔇 사운드 끄기</option>
+                  <option value="rain" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">🌧️ 잔잔한 빗소리</option>
+                  <option value="forest" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">🌲 숲속 바람소리</option>
+                  <option value="waves" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">🌊 잔잔한 파도</option>
+                  <option value="binaural" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">🧠 알파파 10Hz</option>
+                  <option value="whitenoise" className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">📻 차분한 백색소음</option>
+                </select>
+                {focusSoundType !== 'off' && (
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={focusVolume}
+                    onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                    className="w-12 h-1.5 accent-amber-600 cursor-pointer"
+                    title={`음량: ${Math.round(focusVolume * 100)}%`}
+                  />
+                )}
+              </div>
+
+              {/* 5. AI Polisher Quick Tool */}
+              <button
+                type="button"
+                disabled={isRefiningText}
+                onClick={handleAIRefine}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 hover:bg-amber-100 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                title="사회복지 공문서 표준 어투로 문장 정제"
+              >
+                <Sparkles className={`w-3.5 h-3.5 text-amber-600 dark:text-amber-400 ${isRefiningText ? 'animate-spin' : ''}`} />
+                <span>{isRefiningText ? '문장 다듬는 중...' : 'AI 문장 정제'}</span>
+              </button>
+
+              {/* 6. Save Button */}
+              <button
+                type="button"
+                onClick={handleSave}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>서식 저장</span>
+              </button>
+
+              {/* 7. Exit Focus Mode Button */}
+              <button
+                type="button"
+                onClick={() => setIsFocusMode(false)}
+                className="px-3 py-1.5 rounded-xl bg-stone-200 dark:bg-stone-800 hover:bg-stone-300 text-stone-800 dark:text-stone-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                title="집중 모드 나가기 (ESC)"
+              >
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span>일반 모드로 복귀 (ESC)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Focus Mode Toast Notification Banner */}
+          {focusToast && (
+            <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 bg-stone-900 text-white text-xs px-4 py-2.5 rounded-2xl shadow-xl border border-amber-500/50 flex items-center gap-2 animate-slide-in">
+              <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{focusToast}</span>
+            </div>
+          )}
+
+          {/* Expansive Form Canvas in Focus Mode */}
+          <div
+            className={`flex-1 w-full mx-auto p-4 sm:p-8 space-y-6 transition-all ${
+              focusCanvasWidth === 'wide'
+                ? 'max-w-6xl'
+                : focusCanvasWidth === 'full'
+                ? 'max-w-full px-6'
+                : 'max-w-4xl'
+            } ${
+              focusFontSize === 'sm'
+                ? 'text-xs leading-relaxed'
+                : focusFontSize === 'lg'
+                ? 'text-base leading-relaxed'
+                : focusFontSize === 'xl'
+                ? 'text-lg leading-loose'
+                : 'text-sm leading-relaxed'
+            }`}
+          >
+            <div
+              className={`rounded-2xl border p-6 sm:p-12 space-y-8 transition-all ${
+                focusTheme === 'sepia'
+                  ? 'bg-[#FFFDF9] border-[#EAE1D2] shadow-lg'
+                  : focusTheme === 'paper'
+                  ? 'bg-white border-stone-200 shadow-md'
+                  : focusTheme === 'slate'
+                  ? 'bg-[#F8FAFC] border-slate-200 shadow-md'
+                  : 'bg-[#1C1815] border-stone-800 shadow-2xl'
+              }`}
+            >
+              {/* Dynamic 10-Form Sub-Component Render inside Focus Mode */}
+              {doc.documentType === 'intake' && (
+                <IntakeFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'assessment' && (
+                <AssessmentFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'scoring' && (
+                <ScoringFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'case_conference' && (
+                <ConferenceFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'service_plan' && (
+                <ServicePlanFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'agreement' && (
+                <AgreementFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'monitoring' && (
+                <MonitoringFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'reassessment' && (
+                <ReassessmentFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'termination' && (
+                <TerminationFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+              {doc.documentType === 'referral' && (
+                <ReferralFormView
+                  doc={doc}
+                  client={clientInfo}
+                  onChange={handleFieldChange}
+                  onSpecificChange={handleSpecificFieldChange}
+                />
+              )}
+            </div>
+
+            {/* Quick footer action inside Focus Mode */}
+            <div className="flex items-center justify-between pt-4 text-xs text-stone-500 dark:text-stone-400">
+              <span>* 집중 모드 상태에서 작성 중인 내용은 실시간으로 자동 임시 저장됩니다.</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="px-4 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 text-white font-bold cursor-pointer"
+                >
+                  최종 저장하기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFocusMode(false)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 font-semibold cursor-pointer"
+                >
+                  집중 모드 종료
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

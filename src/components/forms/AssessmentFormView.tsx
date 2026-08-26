@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
+import { CheckboxToggle, RadioToggleGroup, MultiCheckboxGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -56,11 +57,54 @@ export const AssessmentFormView: React.FC<FormProps> = ({
   const totalSgdsScore: number = Object.values(currentSgdsAnswers).reduce<number>((acc, cur) => acc + (Number(cur) || 0), 0) || 15;
 
   const handleSgdsChange = (num: number, val: number) => {
+    if (readOnly) return;
     const updated = { ...currentSgdsAnswers, [num]: val };
     const score: number = Object.values(updated).reduce<number>((acc, cur) => acc + (Number(cur) || 0), 0);
     onSpecificChange('sgdsAnswers', updated);
     onSpecificChange('sgdsTotalScore', score);
   };
+
+  // ADL State
+  const adlData: Record<string, string> = fields.adlData || {
+    door: '자립가능',
+    shoesOff: '자립가능',
+    shoesCabinet: '자립가능',
+    chair: '자립가능',
+    bath: '자립가능',
+    clothes: '자립가능',
+    toilet: '자립가능',
+    bowel: '자립가능',
+    walk100m: '약간불편',
+    stairRailing: '약간불편',
+    stairNoRailing: '약간불편',
+  };
+
+  const handleAdlChange = (key: string, val: string) => {
+    if (readOnly) return;
+    const updated = { ...adlData, [key]: val };
+    onSpecificChange('adlData', updated);
+  };
+
+  // IADL State
+  const iadlData: Record<string, string> = fields.iadlData || {
+    phone: '자립가능',
+    shopping: '약간불편',
+    cooking: '약간불편',
+    cleaning: '약간불편',
+    laundry: '약간불편',
+    traffic: '약간불편',
+    medication: '자립가능',
+    money: '자립가능',
+  };
+
+  const handleIadlChange = (key: string, val: string) => {
+    if (readOnly) return;
+    const updated = { ...iadlData, [key]: val };
+    onSpecificChange('iadlData', updated);
+  };
+
+  const economicStatus = fields.economicStatus || '기초생활수급자';
+  const chronicDiseases: string[] = fields.chronicDiseases || ['고혈압', '관절염', '디스크'];
 
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
@@ -79,7 +123,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('basic')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'basic'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -90,7 +134,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('story')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'story'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -101,7 +145,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('genogram')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'genogram'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -112,7 +156,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('adl')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'adl'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -123,7 +167,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('emotion')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'emotion'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -134,7 +178,7 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setSubTab('sgds')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             subTab === 'sgds'
               ? 'bg-amber-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -149,9 +193,27 @@ export const AssessmentFormView: React.FC<FormProps> = ({
         <div className="space-y-4">
           {/* Header Metadata */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs p-3 bg-stone-50 dark:bg-[#251E1A] border border-stone-200 dark:border-stone-800 rounded-lg">
-            <div>상담일시: <strong>2019년 06월 30일 (14:00~15:00)</strong></div>
-            <div>상담자: <strong>{doc.author || '이상호 / 사회복지사'}</strong></div>
-            <div>상담방법: <strong>■ 방문 □ 내방 □ 전화</strong></div>
+            <div className="flex items-center gap-1">
+              <span className="text-stone-500">상담일시:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.assessmentDate || '2019. 06. 30 (14:00~15:00)'}
+                onChange={(e) => onSpecificChange('assessmentDate', e.target.value)}
+                className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-36"
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-stone-500">상담자:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={doc.author || '이상호 / 사회복지사'}
+                onChange={(e) => onChange('author', e.target.value)}
+                className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32 font-medium"
+              />
+            </div>
+            <div>상담방법: <strong>방문상담</strong></div>
             <div>대상자: <strong>{doc.clientName}</strong></div>
           </div>
 
@@ -159,30 +221,49 @@ export const AssessmentFormView: React.FC<FormProps> = ({
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
             <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold text-xs border-b border-stone-300 dark:border-stone-700 flex items-center gap-2">
               <DollarSign className="w-3.5 h-3.5 text-amber-600" />
-              <span>경제사항</span>
+              <span>경제사항 (체크 및 텍스트 수정)</span>
             </div>
             <table className="w-full text-xs border-collapse">
               <tbody>
                 <tr className="border-b border-stone-200 dark:border-stone-800">
                   <th className="w-24 bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">보호형태</th>
-                  <td className="p-2 flex flex-wrap gap-3">
-                    <span className="font-bold text-amber-700 dark:text-amber-400">■ 기초생활수급자</span>
-                    <span className="text-stone-500">□ 차상위</span>
-                    <span className="text-stone-500">□ 의료경감대상</span>
-                    <span className="text-stone-500">□ 국가유공자</span>
-                    <span className="text-stone-500">□ 일반</span>
+                  <td className="p-2">
+                    <RadioToggleGroup
+                      options={['기초생활수급자', '차상위', '의료경감대상', '국가유공자', '일반 저소득']}
+                      value={economicStatus}
+                      onChange={(v) => onSpecificChange('economicStatus', v)}
+                      disabled={readOnly}
+                    />
                   </td>
                 </tr>
                 <tr>
                   <th className="bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">소득상황</th>
                   <td className="p-2">
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      <span>■ 근로소득: 150,000원</span>
-                      <span>■ 생계·주거비: 270,000원</span>
-                      <span>■ 기초연금: 250,000원</span>
-                      <span>■ 후원금(종교): 20,000원</span>
-                      <span>■ 부양자지원(첫째): 100,000원</span>
-                      <span className="font-bold text-amber-700 dark:text-amber-400">총 수입(月): 약 790,000원</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20">근로소득:</span>
+                        <input type="text" disabled={readOnly} value={fields.incomeWork || '150,000원'} onChange={(e) => onSpecificChange('incomeWork', e.target.value)} className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-full" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20">생계·주거비:</span>
+                        <input type="text" disabled={readOnly} value={fields.incomeLivelihood || '270,000원'} onChange={(e) => onSpecificChange('incomeLivelihood', e.target.value)} className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-full" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20">기초연금:</span>
+                        <input type="text" disabled={readOnly} value={fields.incomePension || '250,000원'} onChange={(e) => onSpecificChange('incomePension', e.target.value)} className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-full" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20">후원금:</span>
+                        <input type="text" disabled={readOnly} value={fields.incomeDonation || '20,000원'} onChange={(e) => onSpecificChange('incomeDonation', e.target.value)} className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-full" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20">부양자지원:</span>
+                        <input type="text" disabled={readOnly} value={fields.incomeFamilySupport || '100,000원'} onChange={(e) => onSpecificChange('incomeFamilySupport', e.target.value)} className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-full" />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-stone-500 w-20 font-bold text-amber-700 dark:text-amber-400">총 수입(月):</span>
+                        <input type="text" disabled={readOnly} value={fields.incomeTotal || '약 790,000원'} onChange={(e) => onSpecificChange('incomeTotal', e.target.value)} className="p-1 border rounded bg-amber-50 dark:bg-[#2A231F] text-xs w-full font-bold" />
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -201,24 +282,37 @@ export const AssessmentFormView: React.FC<FormProps> = ({
                 <tr className="border-b border-stone-200 dark:border-stone-800">
                   <th className="w-24 bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">소유/형태</th>
                   <td className="p-2">
-                    <div className="flex flex-wrap gap-4">
-                      <span className="font-bold">■ 월세 (보증금 1,000만원 / 월세 15만원)</span>
-                      <span>■ 아파트/빌라 (2층이상, 승강기 무)</span>
-                    </div>
+                    <input
+                      type="text"
+                      disabled={readOnly}
+                      value={fields.housingDetail || '월세 (보증금 1,000만원 / 월세 15만원), 아파트/빌라 (2층, 승강기 무)'}
+                      onChange={(e) => onSpecificChange('housingDetail', e.target.value)}
+                      className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                    />
                   </td>
                 </tr>
                 <tr className="border-b border-stone-200 dark:border-stone-800">
                   <th className="bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">상태/위생</th>
-                  <td className="p-2 flex flex-wrap gap-6">
-                    <span>주택상태: <strong className="text-amber-700 dark:text-amber-400">■ 불량 (도배/장판 노후)</strong></span>
-                    <span>위생상태: <strong>■ 양호</strong></span>
+                  <td className="p-2">
+                    <input
+                      type="text"
+                      disabled={readOnly}
+                      value={fields.housingHygiene || '주택상태: 불량 (도배/장판 노후), 위생상태: 양호'}
+                      onChange={(e) => onSpecificChange('housingHygiene', e.target.value)}
+                      className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                    />
                   </td>
                 </tr>
                 <tr>
                   <th className="bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">난방/화장실</th>
-                  <td className="p-2 flex flex-wrap gap-6">
-                    <span>난방: <strong>■ 가스보일러</strong></span>
-                    <span>화장실: <strong>■ 단독 / ■ 서양식</strong></span>
+                  <td className="p-2">
+                    <input
+                      type="text"
+                      disabled={readOnly}
+                      value={fields.housingFacility || '난방: 가스보일러, 화장실: 단독 / 서양식 (안전손잡이 설치 필요)'}
+                      onChange={(e) => onSpecificChange('housingFacility', e.target.value)}
+                      className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -229,35 +323,41 @@ export const AssessmentFormView: React.FC<FormProps> = ({
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
             <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold text-xs border-b border-stone-300 dark:border-stone-700 flex items-center gap-2">
               <HeartPulse className="w-3.5 h-3.5 text-amber-600" />
-              <span>건강사항 및 질병 현황</span>
+              <span>건강사항 및 만성질환 (체크/해제 가능)</span>
             </div>
             <table className="w-full text-xs border-collapse">
               <tbody>
                 <tr className="border-b border-stone-200 dark:border-stone-800">
-                  <th className="w-24 bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">전체건강</th>
-                  <td className="p-2 font-bold text-amber-700 dark:text-amber-400">
-                    ■ 질환은 있지만 건강한 편이다 (거동: 도움필요 / 지체장애 3급 / 장기요양 등급없음)
-                  </td>
-                </tr>
-                <tr className="border-b border-stone-200 dark:border-stone-800">
-                  <th className="bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">만성질환</th>
+                  <th className="w-24 bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">만성질환</th>
                   <td className="p-2">
-                    <div className="flex flex-wrap gap-2 text-stone-700 dark:text-stone-300">
-                      <span className="font-bold text-stone-900 dark:text-stone-100">■ 고혈압</span>
-                      <span className="font-bold text-stone-900 dark:text-stone-100">■ 관절염</span>
-                      <span className="font-bold text-stone-900 dark:text-stone-100">■ 디스크</span>
-                      <span className="text-stone-400">□ 당뇨</span>
-                      <span className="text-stone-400">□ 치매</span>
-                      <span className="text-stone-400">□ 뇌졸중</span>
-                      <span className="text-stone-400">□ 심부전</span>
-                    </div>
+                    <MultiCheckboxGroup
+                      options={[
+                        '고혈압',
+                        '관절염',
+                        '디스크',
+                        '당뇨',
+                        '치매',
+                        '뇌졸중',
+                        '심부전',
+                        '골다공증',
+                        '백내장',
+                      ]}
+                      selectedValues={chronicDiseases}
+                      onChange={(v) => onSpecificChange('chronicDiseases', v)}
+                      disabled={readOnly}
+                    />
                   </td>
                 </tr>
                 <tr>
                   <th className="bg-stone-50 dark:bg-[#251E1A] p-2 text-stone-600 dark:text-stone-400 border-r">신체/정신문제</th>
-                  <td className="p-2 flex flex-wrap gap-4">
-                    <span>신체문제: <strong>■ 시각 (노안), ■ 수면장애</strong></span>
-                    <span>정신문제: <strong className="text-amber-700 dark:text-amber-400">■ 우울증 (사별 후 고립)</strong></span>
+                  <td className="p-2">
+                    <input
+                      type="text"
+                      disabled={readOnly}
+                      value={fields.healthPhysicalMentalNotes || '신체: 시각(노안), 무릎 통증, 수면장애 / 정신: 우울증 (사별 후 고립감)'}
+                      onChange={(e) => onSpecificChange('healthPhysicalMentalNotes', e.target.value)}
+                      className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -272,38 +372,73 @@ export const AssessmentFormView: React.FC<FormProps> = ({
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 space-y-3 bg-white dark:bg-[#1E1916] text-xs">
             <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 border-b pb-2 flex items-center gap-2">
               <Brain className="w-4 h-4 text-amber-600" />
-              <span>일반사정 (4대 영역)</span>
+              <span>일반사정 (4대 영역 - 직접 수정 가능)</span>
             </h4>
             <div className="space-y-2">
-              <p><strong>① 외양:</strong> {fields.assessmentAppearance || '백발에 체구가 왜소하시며, 안색은 다소 창백하나 단정한 인상을 유지하심.'}</p>
-              <p><strong>② 인지:</strong> {fields.assessmentCognition || '무학이나 시간, 장소, 사람에 대한 지남력이 양호하고 대화와 의사소통에 전혀 지장이 없음.'}</p>
-              <p><strong>③ 정서:</strong> {fields.assessmentEmotion || '배우자 사별 후 홀로 지내며 느끼는 적적함과 허전함, 경미한 우울감을 표현하심.'}</p>
-              <p><strong>④ 행동:</strong> {fields.assessmentBehavior || '무릎 관절염으로 지팡이를 짚고 보행하며, 복지사의 방문에 매우 반갑게 맞아주며 협조적임.'}</p>
+              <div>
+                <span className="font-bold block mb-1">① 외양:</span>
+                <input
+                  type="text"
+                  disabled={readOnly}
+                  value={fields.assessmentAppearance || '백발에 체구가 왜소하시며, 안색은 다소 창백하나 단정한 인상을 유지하심.'}
+                  onChange={(e) => onSpecificChange('assessmentAppearance', e.target.value)}
+                  className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
+              </div>
+              <div>
+                <span className="font-bold block mb-1">② 인지:</span>
+                <input
+                  type="text"
+                  disabled={readOnly}
+                  value={fields.assessmentCognition || '무학이나 시간, 장소, 사람에 대한 지남력이 양호하고 대화와 의사소통에 전혀 지장이 없음.'}
+                  onChange={(e) => onSpecificChange('assessmentCognition', e.target.value)}
+                  className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
+              </div>
+              <div>
+                <span className="font-bold block mb-1">③ 정서:</span>
+                <input
+                  type="text"
+                  disabled={readOnly}
+                  value={fields.assessmentEmotion || '배우자 사별 후 홀로 지내며 느끼는 적적함과 허전함, 경미한 우울감을 표현하심.'}
+                  onChange={(e) => onSpecificChange('assessmentEmotion', e.target.value)}
+                  className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
+              </div>
+              <div>
+                <span className="font-bold block mb-1">④ 행동:</span>
+                <input
+                  type="text"
+                  disabled={readOnly}
+                  value={fields.assessmentBehavior || '무릎 관절염으로 지팡이를 짚고 보행하며, 복지사의 방문에 매우 반갑게 맞아주며 협조적임.'}
+                  onChange={(e) => onSpecificChange('assessmentBehavior', e.target.value)}
+                  className="w-full p-1.5 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
+              </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-3 bg-white dark:bg-[#1E1916] space-y-1.5">
               <h5 className="font-bold text-stone-800 dark:text-stone-200 border-b pb-1">대상자의 과거사</h5>
-              <p className="text-stone-600 dark:text-stone-400 leading-relaxed">
-                {fields.clientPastStory || '젊은 시절 시장에서 장사를 하며 슬하의 자녀들을 출가시켰으나, 수년 전 남편과 사별한 후 홀로 생활해 옴.'}
-              </p>
+              <textarea
+                rows={4}
+                disabled={readOnly}
+                value={fields.clientPastStory || '젊은 시절 시장에서 장사를 하며 슬하의 자녀들을 출가시켰으나, 수년 전 남편과 사별한 후 홀로 생활해 옴.'}
+                onChange={(e) => onSpecificChange('clientPastStory', e.target.value)}
+                className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
+              />
             </div>
             <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-3 bg-white dark:bg-[#1E1916] space-y-1.5">
               <h5 className="font-bold text-stone-800 dark:text-stone-200 border-b pb-1">대상자의 현재사</h5>
-              <p className="text-stone-600 dark:text-stone-400 leading-relaxed">
-                {fields.clientPresentStory || '만성 관절염으로 활동량이 급격히 줄고 식사 준비에 어려움이 있어 끼니를 거르는 빈도가 잦아짐.'}
-              </p>
+              <textarea
+                rows={4}
+                disabled={readOnly}
+                value={fields.clientPresentStory || '만성 관절염으로 활동량이 급격히 줄고 식사 준비에 어려움이 있어 끼니를 거르는 빈도가 잦아짐.'}
+                onChange={(e) => onSpecificChange('clientPresentStory', e.target.value)}
+                className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
+              />
             </div>
-          </div>
-
-          <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-3 bg-white dark:bg-[#1E1916] space-y-2 text-xs">
-            <h5 className="font-bold text-stone-800 dark:text-stone-200 border-b pb-1">대상자의 욕구사항 & 사회복지사 종합 소견</h5>
-            <p><strong>• 일상생활지원 욕구:</strong> 밑반찬 배달(주 2회) 및 가사지원, 이동 시 차량 연계 희망</p>
-            <p><strong>• 지역사회자원개발 욕구:</strong> 후원물품(쌀, 라면, 생필품) 지원 및 보청기/안과 검진</p>
-            <p className="text-amber-800 dark:text-amber-300 font-semibold pt-1">
-              <strong>• 사회복지사 소견:</strong> 경제적 취약성과 만성질환으로 인한 신체기능 저하, 독거로 인한 우울감 위험이 혼재되어 있어 정기적인 재가노인사례관리 개입이 반드시 필요함.
-            </p>
           </div>
         </div>
       )}
@@ -312,29 +447,26 @@ export const AssessmentFormView: React.FC<FormProps> = ({
       {(subTab === 'genogram' || window.matchMedia?.('print')?.matches) && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 가계도 Genogram Visual */}
             <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] text-xs space-y-3">
               <div className="font-bold border-b pb-2 flex items-center justify-between">
                 <span>가계도 (Genogram)</span>
-                <span className="text-[11px] text-stone-500">3대 가족구조도</span>
+                <span className="text-[11px] text-stone-500">가족 구조도</span>
               </div>
               <div className="bg-stone-50 dark:bg-[#251E1A] p-4 rounded-lg flex flex-col items-center justify-center space-y-4 min-h-[160px] border border-dashed border-stone-300 dark:border-stone-700">
-                {/* 1st Gen */}
                 <div className="flex items-center gap-6">
                   <div className="flex flex-col items-center">
                     <div className="w-9 h-9 border-2 border-stone-600 dark:border-stone-400 flex items-center justify-center text-xs font-bold relative">
                       <span>남편</span>
-                      <div className="absolute inset-0 flex items-center justify-center text-rose-500 font-black">✕ (사망)</div>
+                      <div className="absolute inset-0 flex items-center justify-center text-rose-500 font-black">✕</div>
                     </div>
                   </div>
                   <div className="w-8 h-0.5 bg-stone-500"></div>
                   <div className="flex flex-col items-center">
                     <div className="w-9 h-9 border-2 border-amber-600 rounded-full flex items-center justify-center text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 ring-2 ring-amber-400">
-                      ct (본인)
+                      {doc.clientName?.slice(0, 2) || '본인'}
                     </div>
                   </div>
                 </div>
-                {/* 2nd Gen Children */}
                 <div className="w-36 border-t-2 border-stone-400 pt-2 flex justify-between">
                   <div className="flex flex-col items-center text-[10px]">
                     <div className="w-7 h-7 border border-stone-500 flex items-center justify-center font-semibold">장남</div>
@@ -342,13 +474,12 @@ export const AssessmentFormView: React.FC<FormProps> = ({
                   </div>
                   <div className="flex flex-col items-center text-[10px]">
                     <div className="w-7 h-7 border border-stone-500 rounded-full flex items-center justify-center font-semibold">장녀</div>
-                    <span className="text-stone-500">타지역 거주</span>
+                    <span className="text-stone-500">타지역</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* 생태도 Ecomap Visual */}
             <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] text-xs space-y-3">
               <div className="font-bold border-b pb-2 flex items-center justify-between">
                 <span>생태도 (지역사회 연계망)</span>
@@ -366,207 +497,209 @@ export const AssessmentFormView: React.FC<FormProps> = ({
                 </div>
                 <div className="w-20 h-20 rounded-full border-2 border-amber-600 bg-amber-50 dark:bg-amber-950 flex flex-col items-center justify-center font-bold text-amber-950 dark:text-amber-200">
                   <span>{doc.clientName}</span>
-                  <span className="text-[10px] font-normal">(75세 / 독거)</span>
+                  <span className="text-[10px] font-normal">(독거)</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 w-full text-center text-[11px]">
                   <div className="p-1.5 rounded bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-400">
-                    이웃 주민 (인사정도)
+                    이웃 주민
                   </div>
                   <div></div>
                   <div className="p-1.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-300">
-                    지역 한울교회 (종교)
+                    지역 교회
                   </div>
                 </div>
               </div>
             </div>
           </div>
-
-          {/* 약도 및 진입로 (Page 5) */}
-          <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] text-xs space-y-2">
-            <h4 className="font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
-              <MapPin className="w-4 h-4 text-rose-600" />
-              <span>약도 및 현장 교통편 / 진입 안내</span>
-            </h4>
-            <p className="font-semibold text-stone-700 dark:text-stone-300">
-              • 소재지: {client?.address || '대구광역시 달서구 대명천로 38-1, 2층 (왼쪽 첫 번째 대문)'}
-            </p>
-            <p className="text-stone-500">
-              • 진입 요령: 대명천로 버스정류장 하차 후 송원철학관 골목으로 진입하여 좌측 첫 번째 적벽돌 주택 2층 계단 이용.
-            </p>
-          </div>
         </div>
       )}
 
-      {/* 4. ADL & IADL 척도표 (Page 6) */}
+      {/* 4. ADL & IADL 척도표 (Page 6) - Interactive Checkboxes */}
       {(subTab === 'adl' || window.matchMedia?.('print')?.matches) && (
         <div className="space-y-4 text-xs">
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
-            <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold border-b border-stone-300 dark:border-stone-700">
-              ■ 일상생활 동작정도 (ADL)
+            <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold border-b border-stone-300 dark:border-stone-700 flex items-center justify-between">
+              <span>■ 일상생활 동작정도 (ADL - 각 항목을 클릭하여 상태 변경)</span>
             </div>
             <table className="w-full text-center border-collapse">
               <thead>
                 <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
-                  <th className="p-2 border-r w-24">구분</th>
-                  <th className="p-2 border-r">일상생활 동작</th>
-                  <th className="p-2 border-r w-20 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold">자립가능</th>
-                  <th className="p-2 border-r w-20 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">약간불편</th>
+                  <th className="p-2 border-r text-left">일상생활 동작 항목</th>
+                  <th className="p-2 border-r w-24">자립가능</th>
+                  <th className="p-2 border-r w-24">약간불편</th>
                   <th className="p-2 border-r w-24">도와주면 가능</th>
                   <th className="p-2 w-24">완전도움필요</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b"><td rowSpan={4} className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">기본동작</td><td className="p-2 text-left border-r">문 열고 닫기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">혼자서 신발 벗기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">신발을 신장에 넣기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">의자를 책상에 넣고 빼기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-
-                <tr className="border-b"><td rowSpan={4} className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">신변/용변</td><td className="p-2 text-left border-r">욕조 들어가 목욕하기 / 세수</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">옷 입기 및 벗기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">변기에 앉기 및 뒷처리</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">대소변 조절하기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-
-                <tr className="border-b"><td rowSpan={3} className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">보행/이동</td><td className="p-2 text-left border-r">혼자서 100m 이상 걷기</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">난간 잡고 계단 오르내리기</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">난간 없이 계단 오르내리기</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
+                {[
+                  { key: 'door', label: '문 열고 닫기' },
+                  { key: 'shoesOff', label: '혼자서 신발 벗기' },
+                  { key: 'shoesCabinet', label: '신발을 신발장에 넣기' },
+                  { key: 'chair', label: '의자를 책상에 넣고 빼기' },
+                  { key: 'bath', label: '욕조 들어가 목욕하기 / 세수' },
+                  { key: 'clothes', label: '옷 입기 및 벗기' },
+                  { key: 'toilet', label: '변기에 앉기 및 뒷처리' },
+                  { key: 'bowel', label: '대소변 조절하기' },
+                  { key: 'walk100m', label: '혼자서 100m 이상 걷기' },
+                  { key: 'stairRailing', label: '난간 잡고 계단 오르내리기' },
+                  { key: 'stairNoRailing', label: '난간 없이 계단 오르내리기' },
+                ].map((item) => (
+                  <tr key={item.key} className="border-b border-stone-200 dark:border-stone-800">
+                    <td className="p-2 text-left border-r font-medium">{item.label}</td>
+                    {['자립가능', '약간불편', '도와주면 가능', '완전도움필요'].map((level) => (
+                      <td key={level} className="p-1 border-r last:border-r-0">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => handleAdlChange(item.key, level)}
+                          className={`w-full py-1 rounded text-xs font-bold transition-colors cursor-pointer ${
+                            adlData[item.key] === level
+                              ? 'bg-amber-600 text-white'
+                              : 'text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800'
+                          }`}
+                        >
+                          {adlData[item.key] === level ? '■' : '□'}
+                        </button>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
 
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
-            <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold border-b border-stone-300 dark:border-stone-700">
-              ■ 도구적 일상생활 동작 (IADL)
+            <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold border-b border-stone-300 dark:border-stone-700 flex items-center justify-between">
+              <span>■ 도구적 일상생활 동작 (IADL - 각 항목을 클릭하여 상태 변경)</span>
             </div>
             <table className="w-full text-center border-collapse">
               <thead>
                 <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
-                  <th className="p-2 border-r">항목</th>
+                  <th className="p-2 border-r text-left">도구적 일상동작 항목</th>
                   <th className="p-2 border-r w-24">자립가능</th>
-                  <th className="p-2 border-r w-24 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">약간불편</th>
+                  <th className="p-2 border-r w-24">약간불편</th>
                   <th className="p-2 border-r w-24">도와주면 가능</th>
                   <th className="p-2 w-24">완전도움필요</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b"><td className="p-2 text-left border-r">전화 사용</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">외출 또는 여행</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">물건 구입 및 장보기</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">식사 준비 (조리)</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">집안일 (청소, 정리정돈)</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr className="border-b"><td className="p-2 text-left border-r">제시간에 정확한 용량의 약 복용</td><td className="p-2 border-r font-black text-emerald-600">✓</td><td className="p-2 border-r"></td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
-                <tr><td className="p-2 text-left border-r">집 수공일 (바느질, 못질, 형광등교체)</td><td className="p-2 border-r"></td><td className="p-2 border-r font-black text-amber-600">✓</td><td className="p-2 border-r"></td><td className="p-2"></td></tr>
+                {[
+                  { key: 'phone', label: '전화 사용하기' },
+                  { key: 'shopping', label: '물건 사기(장보기)' },
+                  { key: 'cooking', label: '식사 준비하기' },
+                  { key: 'cleaning', label: '집안 청소 및 정돈' },
+                  { key: 'laundry', label: '빨래하기' },
+                  { key: 'traffic', label: '대중교통 이용하기' },
+                  { key: 'medication', label: '약 챙겨먹기' },
+                  { key: 'money', label: '금전 관리(돈 계산)' },
+                ].map((item) => (
+                  <tr key={item.key} className="border-b border-stone-200 dark:border-stone-800">
+                    <td className="p-2 text-left border-r font-medium">{item.label}</td>
+                    {['자립가능', '약간불편', '도와주면 가능', '완전도움필요'].map((level) => (
+                      <td key={level} className="p-1 border-r last:border-r-0">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => handleIadlChange(item.key, level)}
+                          className={`w-full py-1 rounded text-xs font-bold transition-colors cursor-pointer ${
+                            iadlData[item.key] === level
+                              ? 'bg-amber-600 text-white'
+                              : 'text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800'
+                          }`}
+                        >
+                          {iadlData[item.key] === level ? '■' : '□'}
+                        </button>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* 5. 정서적·사회적 측면 (Page 7) */}
+      {/* 5. 정서적·사회적 측면 */}
       {(subTab === 'emotion' || window.matchMedia?.('print')?.matches) && (
         <div className="space-y-4 text-xs">
           <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] space-y-3">
-            <h4 className="font-bold border-b pb-2">■ 정서적 측면</h4>
+            <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 border-b pb-2">
+              ■ 정서적 및 사회적 상태 사정 (직접 수정 가능)
+            </h4>
             <div className="space-y-2">
-              <div className="flex justify-between border-b pb-1">
-                <span>• 이전에 비해 요즘 더 잘 잊어버리십니까? [기억력]</span>
-                <span className="font-bold text-amber-700 dark:text-amber-400">아니오 ✓</span>
+              <div>
+                <label className="font-semibold block mb-1">1. 정서 상태 및 주 호소 문제:</label>
+                <textarea
+                  rows={2}
+                  disabled={readOnly}
+                  value={fields.emotionMainComplaint || '배우자 사별 후 오랜 기간 독거로 생활하며 느끼는 외로움과 고립감이 깊음. 주간 시간대에 찾아오는 사람이 없어 적적함을 자주 호소함.'}
+                  onChange={(e) => onSpecificChange('emotionMainComplaint', e.target.value)}
+                  className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
               </div>
-              <div className="flex justify-between border-b pb-1">
-                <span>• 슬픔을 느끼는 적이 종종 있으십니까? [정서상태]</span>
-                <span className="font-bold text-amber-700 dark:text-amber-400">예 (사별 후 외로움)</span>
+              <div>
+                <label className="font-semibold block mb-1">2. 사회적 관계 및 지지체계:</label>
+                <textarea
+                  rows={2}
+                  disabled={readOnly}
+                  value={fields.socialSupportNotes || '인근 주민들과 가벼운 눈인사를 나누는 정도이며, 정기적인 친목 모임이나 경로당 출입은 관절 통증과 성격상 부담으로 인해 거의 하지 않음.'}
+                  onChange={(e) => onSpecificChange('socialSupportNotes', e.target.value)}
+                  className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A]"
+                />
               </div>
-              <div className="flex justify-between">
-                <span>• 잠은 편안히 잘 주무십니까?</span>
-                <span className="font-bold text-amber-700 dark:text-amber-400">아니오 (자주 깸)</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] space-y-3">
-            <h4 className="font-bold border-b pb-2">■ 사회적 측면</h4>
-            <div className="space-y-2">
-              <p>• 출가 자녀와의 교류: <strong>④ 1달에 한두 번 정도 연락한다</strong></p>
-              <p>• 이웃과의 친밀도: <strong>② 인사하는 정도이다 (교류 다소 제한)</strong></p>
-              <p>• 여가 소일거리: <strong>③ 집에서 TV를 보거나 그냥 지낸다</strong></p>
-              <p>• 어려움 발생 시 도움처: <strong>⑤ 사회복지관 / ⑥ 동 주민센터</strong></p>
             </div>
           </div>
         </div>
       )}
 
-      {/* 6. 노인 우울증 자가진단 SGDS 15문항 (Page 8) */}
+      {/* 6. 노인 우울증 (SGDS 15문항) */}
       {(subTab === 'sgds' || window.matchMedia?.('print')?.matches) && (
-        <div className="space-y-4 text-xs">
-          <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
-            <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold border-b border-stone-300 dark:border-stone-700 flex items-center justify-between">
-              <span>노인 우울증 자가진단 (SGDS 15문항)</span>
-              <span className="text-amber-800 dark:text-amber-300 font-extrabold text-sm">
-                우울지수 총점: {totalSgdsScore}점
-              </span>
-            </div>
-            <table className="w-full text-center border-collapse">
-              <thead>
-                <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
-                  <th className="p-2 border-r w-16">문항</th>
-                  <th className="p-2 border-r text-left">문 제</th>
-                  <th className="p-2 border-r w-20">아니다 (0점)</th>
-                  <th className="p-2 border-r w-24">그런편이다 (1점)</th>
-                  <th className="p-2 w-20">그렇다 (2점)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sgdsQuestions.map((q) => {
-                  const val = currentSgdsAnswers[q.num] ?? q.default;
-                  return (
-                    <tr key={q.num} className="border-b border-stone-200 dark:border-stone-800 hover:bg-stone-50/50">
-                      <td className="p-2 border-r font-semibold">{q.num}문항</td>
-                      <td className="p-2 border-r text-left">{q.text}</td>
-                      <td className="p-2 border-r">
-                        <input
-                          type="radio"
-                          name={`sgds-${q.num}`}
-                          checked={val === 0}
-                          onChange={() => handleSgdsChange(q.num, 0)}
-                          disabled={readOnly}
-                        />
-                      </td>
-                      <td className="p-2 border-r">
-                        <input
-                          type="radio"
-                          name={`sgds-${q.num}`}
-                          checked={val === 1}
-                          onChange={() => handleSgdsChange(q.num, 1)}
-                          disabled={readOnly}
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="radio"
-                          name={`sgds-${q.num}`}
-                          checked={val === 2}
-                          onChange={() => handleSgdsChange(q.num, 2)}
-                          disabled={readOnly}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
+          <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold text-xs border-b border-stone-300 dark:border-stone-700 flex items-center justify-between">
+            <span>■ 단축형 노인 우울척도 (SGDS-K 15문항 - 클릭하여 문항별 점수 선택)</span>
+            <span className="text-amber-800 dark:text-amber-300 font-extrabold text-sm bg-amber-50 dark:bg-amber-950 px-2.5 py-1 rounded border border-amber-300">
+              총점: {totalSgdsScore}점 / 30점 ({totalSgdsScore >= 8 ? '중등도 이상 우울 의심' : '정상'})
+            </span>
           </div>
-
-          {/* SGDS 결과 판정 */}
-          <div className="p-4 rounded-lg bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-2">
-            <div className="flex items-center justify-between font-bold text-amber-950 dark:text-amber-200">
-              <span className="text-sm">검진결과: 우울지수 {totalSgdsScore}점</span>
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200 text-xs">
-                {totalSgdsScore <= 14 ? '정상범위 (14점 이하)' : totalSgdsScore <= 23 ? '경미한 우울증 상태 (15~23점)' : '심한 우울증 상태 (24~30점)'}
-              </span>
-            </div>
-            <p className="text-stone-700 dark:text-stone-300 text-xs leading-relaxed">
-              • <strong>판정 소견:</strong> 경미한 우울증 상태로 지속적인 정서적 안부확인, 말벗 서비스 및 경로당/프로그램 참여 연계가 권장됨.
-            </p>
-          </div>
+          <table className="w-full text-xs text-center border-collapse">
+            <thead>
+              <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
+                <th className="p-2 border-r w-12">번호</th>
+                <th className="p-2 border-r text-left">문항 내용</th>
+                <th className="p-2 border-r w-24">예 (2점)</th>
+                <th className="p-2 border-r w-24">보통 (1점)</th>
+                <th className="p-2 w-24">아니오 (0점)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sgdsQuestions.map((q) => {
+                const currentVal = currentSgdsAnswers[q.num] !== undefined ? currentSgdsAnswers[q.num] : q.default;
+                return (
+                  <tr key={q.num} className="border-b border-stone-200 dark:border-stone-800">
+                    <td className="p-2 border-r font-semibold">{q.num}</td>
+                    <td className="p-2 text-left border-r font-medium">{q.text}</td>
+                    {[2, 1, 0].map((score) => (
+                      <td key={score} className="p-1 border-r last:border-r-0">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => handleSgdsChange(q.num, score)}
+                          className={`w-full py-1 rounded text-xs font-bold transition-colors cursor-pointer ${
+                            currentVal === score
+                              ? 'bg-amber-600 text-white'
+                              : 'text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800'
+                          }`}
+                        >
+                          {currentVal === score ? '■' : '□'}
+                        </button>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

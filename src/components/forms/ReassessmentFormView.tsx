@@ -1,6 +1,7 @@
 import React from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
 import { RefreshCw, FileText, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -19,6 +20,10 @@ export const ReassessmentFormView: React.FC<FormProps> = ({
 }) => {
   const fields = doc.formSpecificFields || {};
 
+  const reassessmentType = fields.reassessmentType || '새로운 욕구가 발생';
+  const reassessmentFactor = fields.reassessmentFactor || '자원과 환경에 의한 요인 (장기요양 등급탈락)';
+  const reassessmentDecision = fields.reassessmentDecision || '서비스 계획 변경 후 지속 제공 (재계획 수립)';
+
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
       {/* Header */}
@@ -33,9 +38,36 @@ export const ReassessmentFormView: React.FC<FormProps> = ({
 
       {/* Metadata */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs p-3 bg-stone-50 dark:bg-[#251E1A] border border-stone-200 dark:border-stone-800 rounded-lg">
-        <div>대상자명: <strong className="text-sm">{doc.clientName}</strong></div>
-        <div>재사정일: <strong>{fields.reassessmentDate || '2019. 07. 18'}</strong></div>
-        <div>담당복지사: <strong>{doc.author || '이상호'}</strong></div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">대상자:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={doc.clientName}
+            onChange={(e) => onChange('clientName', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] font-bold text-xs w-28"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">재사정일:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={fields.reassessmentDate || '2019. 07. 18'}
+            onChange={(e) => onSpecificChange('reassessmentDate', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-28"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">담당자:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={doc.author || '이상호 사회복지사'}
+            onChange={(e) => onChange('author', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32 font-medium"
+          />
+        </div>
         <div>사례관리 구분: <strong>사례관리형</strong></div>
       </div>
 
@@ -43,24 +75,40 @@ export const ReassessmentFormView: React.FC<FormProps> = ({
       <div className="border border-stone-300 dark:border-stone-700 rounded-lg overflow-hidden bg-white dark:bg-[#1E1916]">
         <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold text-xs border-b border-stone-300 dark:border-stone-700 flex items-center gap-1.5">
           <RefreshCw className="w-4 h-4 text-cyan-600" />
-          <span>■ 재사정 유형 및 발생 요인</span>
+          <span>■ 재사정 유형 및 발생 요인 (체크/해제 선택)</span>
         </div>
         <table className="w-full text-xs border-collapse">
           <tbody>
             <tr className="border-b border-stone-200 dark:border-stone-800">
               <th className="w-32 bg-stone-50 dark:bg-[#251E1A] p-2.5 text-stone-600 dark:text-stone-400 border-r">재사정 유형</th>
-              <td className="p-2.5 flex flex-wrap gap-4 font-bold">
-                <span className="text-cyan-800 dark:text-cyan-300">■ 새로운 욕구가 발생</span>
-                <span className="text-stone-400">□ 미해결 욕구가 존재</span>
-                <span className="text-stone-400">□ 자원환경의 급격한 변화</span>
+              <td className="p-2.5">
+                <RadioToggleGroup
+                  options={[
+                    '새로운 욕구가 발생',
+                    '미해결 욕구가 존재',
+                    '자원환경의 급격한 변화',
+                    '기타 사유',
+                  ]}
+                  value={reassessmentType}
+                  onChange={(v) => onSpecificChange('reassessmentType', v)}
+                  disabled={readOnly}
+                />
               </td>
             </tr>
             <tr>
               <th className="bg-stone-50 dark:bg-[#251E1A] p-2.5 text-stone-600 dark:text-stone-400 border-r">재사정 요인</th>
-              <td className="p-2.5 flex flex-wrap gap-4 font-bold">
-                <span className="text-stone-400">□ 클라이언트에 의한 요인</span>
-                <span className="text-cyan-800 dark:text-cyan-300">■ 자원과 환경에 의한 요인 (장기요양 등급탈락)</span>
-                <span className="text-stone-400">□ 사례관리자에 의한 요인</span>
+              <td className="p-2.5">
+                <RadioToggleGroup
+                  options={[
+                    '클라이언트에 의한 요인',
+                    '자원과 환경에 의한 요인 (장기요양 등급탈락)',
+                    '사례관리자에 의한 요인',
+                    '기관 내부 사정',
+                  ]}
+                  value={reassessmentFactor}
+                  onChange={(v) => onSpecificChange('reassessmentFactor', v)}
+                  disabled={readOnly}
+                />
               </td>
             </tr>
           </tbody>
@@ -96,13 +144,20 @@ export const ReassessmentFormView: React.FC<FormProps> = ({
         </div>
 
         <div>
-          <label className="font-bold text-sm text-stone-800 dark:text-stone-200 block mb-1">
+          <label className="font-bold text-sm text-stone-800 dark:text-stone-200 block mb-2">
             3. 재사정 판정 및 후속 조치
           </label>
-          <div className="p-3 bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 rounded font-bold flex items-center justify-between text-cyan-950 dark:text-cyan-200">
-            <span>■ 서비스 재계획 수립 (서비스 유지 및 가사연계 확대)</span>
-            <span className="text-xs font-normal">차기 회의를 통해 서비스 계획서 수정 반영</span>
-          </div>
+          <RadioToggleGroup
+            options={[
+              '서비스 계획 변경 후 지속 제공 (재계획 수립)',
+              '현 서비스 계획 유지',
+              '타 기관 이관 검토',
+              '종결 처리',
+            ]}
+            value={reassessmentDecision}
+            onChange={(v) => onSpecificChange('reassessmentDecision', v)}
+            disabled={readOnly}
+          />
         </div>
       </div>
     </div>

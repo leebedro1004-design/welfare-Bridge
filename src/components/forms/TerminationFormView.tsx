@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
 import { Award, FileText, CheckCircle2, TrendingUp, AlertCircle, ArrowRight } from 'lucide-react';
+import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -20,6 +21,8 @@ export const TerminationFormView: React.FC<FormProps> = ({
   const fields = doc.formSpecificFields || {};
   const [tab, setTab] = useState<'notice' | 'report' | 'evaluation'>('report');
 
+  const terminationReasonType = fields.terminationReasonType || '타지역 전출/거주지 이전';
+
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
       {/* Header */}
@@ -37,7 +40,7 @@ export const TerminationFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setTab('notice')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             tab === 'notice'
               ? 'bg-rose-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -48,7 +51,7 @@ export const TerminationFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setTab('report')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             tab === 'report'
               ? 'bg-rose-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -59,7 +62,7 @@ export const TerminationFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setTab('evaluation')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             tab === 'evaluation'
               ? 'bg-rose-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -78,15 +81,57 @@ export const TerminationFormView: React.FC<FormProps> = ({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 bg-stone-50 dark:bg-[#251E1A] rounded border">
             <div>대상자: <strong>{doc.clientName}</strong></div>
             <div>생년월일: <strong>{client?.birthDate || '1945. 12. 31'}</strong></div>
-            <div>종결일자: <strong>{fields.terminationNoticeDate || '2019. 07. 20'}</strong></div>
-            <div>발신기관: <strong>굿실버노인복지센터</strong></div>
+            <div className="flex items-center gap-1">
+              <span className="text-stone-500">종결일자:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.terminationNoticeDate || '2019. 07. 20'}
+                onChange={(e) => onSpecificChange('terminationNoticeDate', e.target.value)}
+                className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-28"
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-stone-500">발신기관:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.issuingOrg || '굿실버노인복지센터'}
+                onChange={(e) => onSpecificChange('issuingOrg', e.target.value)}
+                className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32"
+              />
+            </div>
           </div>
           <div className="p-4 bg-rose-50/60 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded space-y-2 leading-relaxed">
             <p className="font-semibold text-rose-950 dark:text-rose-200">
               어르신께 제공되던 재가노인지원서비스의 종결 사유 및 후속 조치를 다음과 같이 안내해 드립니다.
             </p>
-            <p><strong>• 종결 사유:</strong> 타 관할 지역(대구 달서구 상인동 → 성당동)으로의 거주지 이전에 따른 기관 이관 및 연계</p>
-            <p><strong>• 후속 조치:</strong> 이관 대상 기관인 '성당노인복지센터'로 사례관리 기록 및 서비스 내역 일체를 인계하여 돌봄 공백이 발생하지 않도록 조치함.</p>
+            <div className="space-y-1">
+              <label className="font-bold block">종결 사유 구분 (선택/수정):</label>
+              <RadioToggleGroup
+                options={[
+                  '타지역 전출/거주지 이전',
+                  '사망',
+                  '시설 입소',
+                  '이용 거부/스스로 종결 희망',
+                  '장기요양 등급 취득에 따른 이관',
+                  '상태 호전(목표 달성)',
+                ]}
+                value={terminationReasonType}
+                onChange={(v) => onSpecificChange('terminationReasonType', v)}
+                disabled={readOnly}
+              />
+            </div>
+            <div>
+              <label className="font-bold block mb-1">상세 종결 사유 및 후속 조치 내용:</label>
+              <textarea
+                rows={3}
+                disabled={readOnly}
+                value={fields.terminationNoticeDetail || '• 종결 사유: 타 관할 지역(대구 달서구 상인동 → 성당동)으로의 거주지 이전에 따른 기관 이관 및 연계\n• 후속 조치: 이관 대상 기관인 성당노인복지센터로 사례관리 기록 및 서비스 내역 일체를 인계하여 돌봄 공백이 발생하지 않도록 조치함.'}
+                onChange={(e) => onSpecificChange('terminationNoticeDetail', e.target.value)}
+                className="w-full p-2 border rounded bg-white dark:bg-[#1E1916] leading-relaxed"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -96,60 +141,29 @@ export const TerminationFormView: React.FC<FormProps> = ({
         <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
           <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 border-b pb-2 flex items-center justify-between">
             <span>■ 사례관리 종결보고서 (초기사정 대비 변화 평가)</span>
-            <span className="text-rose-700 dark:text-rose-300 font-bold">종결유형: 이관 / 전출</span>
+            <span className="text-rose-700 dark:text-rose-300 font-bold">유형: {terminationReasonType}</span>
           </h4>
-
-          {/* Before & After Comparison Table */}
-          <table className="w-full text-xs text-center border-collapse">
-            <thead>
-              <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
-                <th className="p-2 border-r w-28">평가 영역</th>
-                <th className="p-2 border-r text-left w-1/2">초기 개입 당시 상태</th>
-                <th className="p-2 text-left">종결 시점 변화 상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b">
-                <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">1. 신체/건강</td>
-                <td className="p-2 border-r text-left text-stone-600 dark:text-stone-400">
-                  만성 관절염으로 식사 준비 곤란, 잦은 결식 및 영양 결핍 상태.
-                </td>
-                <td className="p-2 text-left font-semibold text-emerald-700 dark:text-emerald-300">
-                  주 2회 정기 영양 밑반찬 제공으로 기력 회복 및 규칙적 식습관 정착.
-                </td>
-              </tr>
-              <tr className="border-b">
-                <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">2. 정서/심리</td>
-                <td className="p-2 border-r text-left text-stone-600 dark:text-stone-400">
-                  배우자 사별 후 독거로 인한 극심한 우울감(SGDS 15점) 및 사회적 고립.
-                </td>
-                <td className="p-2 text-left font-semibold text-emerald-700 dark:text-emerald-300">
-                  주 1회 방문 말벗상담 및 생신잔치 지원으로 우울감 대폭 경감.
-                </td>
-              </tr>
-              <tr>
-                <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">3. 주거/안전</td>
-                <td className="p-2 border-r text-left text-stone-600 dark:text-stone-400">
-                  계단 및 화장실 내 낙상 위험 존재, 방충망 파손.
-                </td>
-                <td className="p-2 text-left font-semibold text-emerald-700 dark:text-emerald-300">
-                  안전손잡이 설치 및 방충망 교체 지원으로 안전한 주거환경 확보.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div>
-            <label className="font-bold text-stone-800 dark:text-stone-200 block mb-1">
-              사회복지사 종합 종결 소견
-            </label>
-            <textarea
-              rows={2}
-              disabled={readOnly}
-              value={fields.terminationWorkerOpinion || '초기 수립된 단기 목표(영양개선, 우울감 완화, 주거안전)를 성공적으로 달성하였으며, 대상자의 거주지 이전에 따라 관할 성당노인복지센터로 안전하게 이관 연계 종결함.'}
-              onChange={(e) => onSpecificChange('terminationWorkerOpinion', e.target.value)}
-              className="w-full p-2.5 border border-stone-300 dark:border-stone-700 rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
-            />
+          <div className="space-y-3">
+            <div>
+              <label className="font-semibold block mb-1">1. 개입 목표 달성도 평가:</label>
+              <textarea
+                rows={2}
+                disabled={readOnly}
+                value={fields.goalAchievementEvaluation || '주 2회 밑반찬 제공으로 결식 위험을 해소하고 영양 상태가 개선되었으며, 주 1회 정기 방문상담을 통해 우울 척도가 18점에서 12점으로 감소하여 목표를 85% 이상 달성함.'}
+                onChange={(e) => onSpecificChange('goalAchievementEvaluation', e.target.value)}
+                className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A]"
+              />
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">2. 종결 후 사후관리(사후지도) 계획:</label>
+              <textarea
+                rows={2}
+                disabled={readOnly}
+                value={fields.followUpPlan || '이관 기관과 유선 연락망을 유지하며, 종결 후 1개월 및 3개월 시점에 유선 안부확인을 통해 새로운 환경 적응 및 서비스 연계 지속 여부를 모니터링함.'}
+                onChange={(e) => onSpecificChange('followUpPlan', e.target.value)}
+                className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A]"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -157,28 +171,18 @@ export const TerminationFormView: React.FC<FormProps> = ({
       {/* 3. 사례평가서 (Page 22) */}
       {(tab === 'evaluation' || window.matchMedia?.('print')?.matches) && (
         <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
-          <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 border-b pb-2 flex items-center justify-between">
-            <span>■ 5단계 목표달성 사례평가서</span>
-            <span className="text-emerald-700 dark:text-emerald-300 font-black text-sm">
-              목표 달성도: 90% 이상 (성공적 개입)
-            </span>
+          <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 border-b pb-2">
+            ■ 사례평가서 (종합 성과 및 제언)
           </h4>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-3 bg-stone-50 dark:bg-[#251E1A] rounded border space-y-2">
-              <h5 className="font-bold text-emerald-700 dark:text-emerald-400">긍정적 효과 및 성과</h5>
-              <p className="leading-relaxed text-stone-600 dark:text-stone-400">
-                • 결식 없는 안정적 식생활 영양 개선<br />
-                • 정서적 지지망 강화를 통한 사회적 고립감 해소<br />
-                • 공공 및 민간 안전망 상호 연계 체계 구축
-              </p>
-            </div>
-            <div className="p-3 bg-stone-50 dark:bg-[#251E1A] rounded border space-y-2">
-              <h5 className="font-bold text-amber-700 dark:text-amber-400">한계점 및 향후 제언</h5>
-              <p className="leading-relaxed text-stone-600 dark:text-stone-400">
-                • 만성 관절염으로 인한 보행 불편은 지속되므로 이관 기관에서의 지속적인 병원동행 서비스 연계 필요
-              </p>
-            </div>
+          <div>
+            <label className="font-semibold block mb-1">사회복지사 총괄 제언:</label>
+            <textarea
+              rows={3}
+              disabled={readOnly}
+              value={fields.overallWorkerReview || '지역사회 내 다학제적 자원연계(주민센터, 자원봉사센터, 보건소)가 원활히 작동하여 단기간 내에 대상자의 복합 위기를 효과적으로 경감시켰음.'}
+              onChange={(e) => onSpecificChange('overallWorkerReview', e.target.value)}
+              className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A]"
+            />
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
-import { Eye, CheckCircle2, TrendingUp, HelpCircle } from 'lucide-react';
+import { Eye, CheckCircle2 } from 'lucide-react';
+import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -18,21 +19,33 @@ export const MonitoringFormView: React.FC<FormProps> = ({
   readOnly = false,
 }) => {
   const fields = doc.formSpecificFields || {};
-  const scores = fields.monitoringSatisfactionScores || {
-    halfYearSatisfaction: '매우 만족',
-    scheduleAdherence: '매우 만족',
-    serviceGuideAccuracy: '매우 만족',
-    lifeHelpEffectiveness: '매우 만족',
-    workerSatisfaction: '매우 만족',
+  const scores: Record<string, number> = fields.monitoringSatisfactionScores || {
+    q1: 5,
+    q2: 5,
+    q3: 5,
+    q4: 5,
+    q5: 5,
   };
 
   const satisfactionItems = [
-    { key: 'halfYearSatisfaction', label: '1. 지난 6개월간 제공된 재가노인지원서비스에 전반적으로 만족하십니까?' },
-    { key: 'scheduleAdherence', label: '2. 약속된 서비스 일정과 시간에 맞추어 정확하게 서비스가 제공되었습니까?' },
-    { key: 'serviceGuideAccuracy', label: '3. 서비스 제공 시 친절한 안내와 설명이 충분히 이루어졌습니까?' },
-    { key: 'lifeHelpEffectiveness', label: '4. 제공된 서비스(식사/정서/주거 등)가 어르신의 일상생활 유지에 실질적 도움이 되었습니까?' },
-    { key: 'workerSatisfaction', label: '5. 방문한 사회복지사 및 자원봉사자의 응대 태도와 전문성에 만족하십니까?' },
+    { key: 'q1', label: '1. 지난 6개월간 제공된 재가노인지원서비스에 전반적으로 만족하십니까?' },
+    { key: 'q2', label: '2. 약속된 서비스 일정과 시간에 맞추어 정확하게 서비스가 제공되었습니까?' },
+    { key: 'q3', label: '3. 서비스 제공 시 친절한 안내와 설명이 충분히 이루어졌습니까?' },
+    { key: 'q4', label: '4. 제공된 서비스(식사/정서/주거 등)가 어르신의 일상생활 유지에 실질적 도움이 되었습니까?' },
+    { key: 'q5', label: '5. 방문한 사회복지사 및 자원봉사자의 응대 태도와 전문성에 만족하십니까?' },
   ];
+
+  const handleScoreChange = (qKey: string, scoreVal: number) => {
+    if (readOnly) return;
+    const updated = { ...scores, [qKey]: scoreVal };
+    onSpecificChange('monitoringSatisfactionScores', updated);
+  };
+
+  const avgScore = (
+    Object.values(scores).reduce((a, b) => a + Number(b), 0) / (Object.values(scores).length || 1)
+  ).toFixed(1);
+
+  const monitoringResult = fields.monitoringResult || '서비스 유지 (현 계획 지속 제공)';
 
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
@@ -48,10 +61,46 @@ export const MonitoringFormView: React.FC<FormProps> = ({
 
       {/* Monitoring Metadata */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs p-3 bg-stone-50 dark:bg-[#251E1A] border border-stone-200 dark:border-stone-800 rounded-lg">
-        <div>대상자명: <strong className="text-sm">{doc.clientName}</strong></div>
-        <div>모니터링 일시: <strong>{fields.monitoringDate || '2019. 07. 15'}</strong></div>
-        <div>구분/방법: <strong>{fields.monitoringType || '정기'} / {fields.monitoringMethod || '방문상담'}</strong></div>
-        <div>담당자: <strong>{doc.author || '이상호 사회복지사'}</strong></div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">대상자:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={doc.clientName}
+            onChange={(e) => onChange('clientName', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] font-bold text-xs w-28"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">모니터링일:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={fields.monitoringDate || '2019. 07. 15'}
+            onChange={(e) => onSpecificChange('monitoringDate', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-28"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">구분/방법:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={fields.monitoringMethod || '정기 / 방문상담'}
+            onChange={(e) => onSpecificChange('monitoringMethod', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-stone-500">담당자:</span>
+          <input
+            type="text"
+            disabled={readOnly}
+            value={doc.author || '이상호 사회복지사'}
+            onChange={(e) => onChange('author', e.target.value)}
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32 font-medium"
+          />
+        </div>
       </div>
 
       {/* 5-Item Satisfaction Survey Table */}
@@ -59,34 +108,48 @@ export const MonitoringFormView: React.FC<FormProps> = ({
         <div className="bg-stone-100 dark:bg-[#2A231F] px-4 py-2 font-bold text-xs border-b border-stone-300 dark:border-stone-700 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
             <Eye className="w-4 h-4 text-amber-600" />
-            <span>■ 이용자 만족도 점검 (5문항 5점 척도)</span>
+            <span>■ 이용자 만족도 점검 (5문항 5점 척도 - 클릭하여 선택/수정)</span>
           </span>
-          <span className="text-emerald-700 dark:text-emerald-400 font-bold">
-            평균 만족도: 5.0 / 5.0 (매우 만족)
+          <span className="text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded border border-emerald-300 dark:border-emerald-800">
+            평균 만족도: {avgScore} / 5.0
           </span>
         </div>
         <table className="w-full text-xs text-center border-collapse">
           <thead>
             <tr className="bg-stone-50 dark:bg-[#251E1A] border-b text-stone-600 dark:text-stone-400">
               <th className="p-2 border-r text-left">평가 설문 항목</th>
-              <th className="p-2 border-r w-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">매우만족 (5점)</th>
-              <th className="p-2 border-r w-16">만족 (4점)</th>
-              <th className="p-2 border-r w-16">보통 (3점)</th>
-              <th className="p-2 border-r w-16">불만족 (2점)</th>
-              <th className="p-2 w-16">매우불만 (1점)</th>
+              <th className="p-2 border-r w-20">매우만족(5점)</th>
+              <th className="p-2 border-r w-20">만족(4점)</th>
+              <th className="p-2 border-r w-20">보통(3점)</th>
+              <th className="p-2 border-r w-20">불만족(2점)</th>
+              <th className="p-2 w-20">매우불만(1점)</th>
             </tr>
           </thead>
           <tbody>
-            {satisfactionItems.map((item, idx) => (
-              <tr key={item.key} className="border-b border-stone-200 dark:border-stone-800">
-                <td className="p-2.5 text-left border-r font-medium">{item.label}</td>
-                <td className="p-2 border-r font-black text-emerald-600">■</td>
-                <td className="p-2 border-r text-stone-400">□</td>
-                <td className="p-2 border-r text-stone-400">□</td>
-                <td className="p-2 border-r text-stone-400">□</td>
-                <td className="p-2 text-stone-400">□</td>
-              </tr>
-            ))}
+            {satisfactionItems.map((item) => {
+              const currentScore = Number(scores[item.key] ?? 5);
+              return (
+                <tr key={item.key} className="border-b border-stone-200 dark:border-stone-800">
+                  <td className="p-2.5 text-left border-r font-medium">{item.label}</td>
+                  {[5, 4, 3, 2, 1].map((point) => (
+                    <td key={point} className="p-1.5 border-r last:border-r-0">
+                      <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => handleScoreChange(item.key, point)}
+                        className={`w-full py-1 rounded font-bold transition-colors cursor-pointer ${
+                          currentScore === point
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800'
+                        }`}
+                      >
+                        {currentScore === point ? '■' : '□'}
+                      </button>
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -120,14 +183,20 @@ export const MonitoringFormView: React.FC<FormProps> = ({
         </div>
 
         <div>
-          <label className="font-bold text-sm text-stone-800 dark:text-stone-200 block mb-1">
-            3. 종합 모니터링 조치 결과
+          <label className="font-bold text-sm text-stone-800 dark:text-stone-200 block mb-2">
+            3. 종합 모니터링 조치 결과 (체크/해제 선택)
           </label>
-          <div className="p-3 bg-stone-50 dark:bg-[#251E1A] rounded border flex flex-wrap items-center gap-6 font-bold">
-            <span className="text-emerald-700 dark:text-emerald-400">■ 서비스 유지 (현 계획 지속 제공)</span>
-            <span className="text-stone-400">□ 서비스 변경 (재사정 필요)</span>
-            <span className="text-stone-400">□ 종결 검토</span>
-          </div>
+          <RadioToggleGroup
+            options={[
+              '서비스 유지 (현 계획 지속 제공)',
+              '서비스 변경 (재사정 필요)',
+              '종결 검토',
+              '긴급위기 개입',
+            ]}
+            value={monitoringResult}
+            onChange={(v) => onSpecificChange('monitoringResult', v)}
+            disabled={readOnly}
+          />
         </div>
       </div>
     </div>

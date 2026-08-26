@@ -33,13 +33,28 @@ import {
   Send,
   HelpCircle,
   MessageSquareQuote,
-  ChevronRight
+  ChevronRight,
+  VolumeX,
+  FastForward,
+  Headphones,
+  Edit3,
+  Keyboard,
+  Star,
+  Tag
 } from 'lucide-react';
 import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight } from '../types';
 import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument } from '../utils/documentTemplates';
 import { PRESET_SCENARIOS } from '../data/mockData';
 import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuides';
 import confetti from 'canvas-confetti';
+
+export interface KeySegmentBookmark {
+  id: string;
+  timestamp: string;
+  seconds: number;
+  label: string;
+  contextText?: string;
+}
 
 interface AIStudioTranscriptProps {
   clients: ClientProfile[];
@@ -69,6 +84,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     '낙상/주거안전',
     '만성질환/복약',
   ]);
+
+  // Key segment bookmarks state
+  const [bookmarks, setBookmarks] = useState<KeySegmentBookmark[]>([]);
+  const [shortcutToast, setShortcutToast] = useState<string | null>(null);
+  const [showShortcutHelpModal, setShowShortcutHelpModal] = useState<boolean>(false);
 
   // Consultation Guide Mode states
   const [activeGuideStageId, setActiveGuideStageId] = useState<number>(1);
@@ -102,8 +122,18 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analysisProgress, setAnalysisProgress] = useState<number>(0);
   const [analysisResult, setAnalysisResult] = useState<AIAnalysisResponse | null>(null);
+  const [isEditingAnalysis, setIsEditingAnalysis] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Text-To-Speech (TTS) State for Social Workers on the Move
+  const [isTtsSpeaking, setIsTtsSpeaking] = useState<boolean>(false);
+  const [isTtsPaused, setIsTtsPaused] = useState<boolean>(false);
+  const [ttsRate, setTtsRate] = useState<number>(1.0);
+  const [ttsVolume, setTtsVolume] = useState<number>(1.0);
+  const [autoPlayTtsOnComplete, setAutoPlayTtsOnComplete] = useState<boolean>(false);
+  const [ttsActiveSection, setTtsActiveSection] = useState<string>('');
+  const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Focus Area options
   const FOCUS_OPTIONS = [
@@ -239,6 +269,135 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       audioContextRef.current = null;
     }
   };
+
+  // Format Timer helper
+  const formatTimer = (totalSeconds: number): string => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 🎯 Key Segment Bookmark Handler (중요 발화 구간 즉시 마킹)
+  const handleMarkKeySegment = (customLabel?: string) => {
+    const timeStr = isRecording
+      ? formatTimer(recordingSeconds)
+      : new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    const label = customLabel || `⭐ 핵심호소·위험징후 [${timeStr}]`;
+    const newBookmark: KeySegmentBookmark = {
+      id: `bm-${Date.now()}`,
+      timestamp: timeStr,
+      seconds: recordingSeconds,
+      label,
+      contextText: interimTranscript || transcriptText.slice(-60) || '어르신 주요 발화 지점',
+    };
+
+    setBookmarks((prev) => [...prev, newBookmark]);
+
+    // Insert marker into transcript text
+    const markTag = `\n[⭐ 중요 구간 마킹 (${timeStr})]: `;
+    setTranscriptText((prev) => (prev ? prev + markTag : markTag));
+
+    setShortcutToast(`[단축키 M] 중요 발화 구간 (${timeStr})이 북마크에 기록되었습니다.`);
+    setTimeout(() => setShortcutToast(null), 3000);
+  };
+
+  // ⌨️ Keyboard Shortcuts Global Event Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInputFocused =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+
+      // 1. Space Bar -> Toggle Recording (when not typing in an input/textarea)
+      if (e.code === 'Space' && !isInputFocused) {
+        e.preventDefault();
+        toggleRecording();
+        setShortcutToast(
+          isRecording
+            ? '[단축키 Space] 상담 녹음이 종료되었습니다.'
+            : '[단축키 Space] 현장 실시간 녹음이 시작되었습니다.'
+        );
+        setTimeout(() => setShortcutToast(null), 2500);
+        return;
+      }
+
+      // 2. Ctrl + Space or Alt + R -> Toggle Recording (anywhere)
+      if ((e.ctrlKey && e.code === 'Space') || (e.altKey && e.key.toLowerCase() === 'r')) {
+        e.preventDefault();
+        toggleRecording();
+        setShortcutToast(
+          isRecording
+            ? '[단축키] 상담 녹음이 종료되었습니다.'
+            : '[단축키] 현장 실시간 녹음이 시작되었습니다.'
+        );
+        setTimeout(() => setShortcutToast(null), 2500);
+        return;
+      }
+
+      // 3. M key (when not typing) or Alt + M / Ctrl + M -> Bookmark Key Segment
+      if (
+        (!isInputFocused && e.key.toLowerCase() === 'm') ||
+        (e.altKey && e.key.toLowerCase() === 'm') ||
+        (e.ctrlKey && e.key.toLowerCase() === 'm')
+      ) {
+        e.preventDefault();
+        handleMarkKeySegment();
+        return;
+      }
+
+      // 4. Ctrl + Enter or Alt + A -> Run AI Analysis
+      if ((e.ctrlKey && e.key === 'Enter') || (e.altKey && e.key.toLowerCase() === 'a')) {
+        e.preventDefault();
+        if (!isAnalyzing && transcriptText.trim()) {
+          setShortcutToast('[단축키 Ctrl+Enter] AI 표준 서식 사정 분석을 시작합니다.');
+          setTimeout(() => setShortcutToast(null), 2500);
+          runAIAnalysis();
+        }
+        return;
+      }
+
+      // 5. Alt + E -> Toggle Analysis Edit Mode
+      if (e.altKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        setIsEditingAnalysis((prev) => !prev);
+        setShortcutToast(
+          !isEditingAnalysis
+            ? '[단축키 Alt+E] 직접 수정 모드가 활성화되었습니다.'
+            : '[단축키 Alt+E] 수정 미리보기 모드로 전환되었습니다.'
+        );
+        setTimeout(() => setShortcutToast(null), 2500);
+        return;
+      }
+
+      // 6. Alt + T -> Toggle TTS Audio Summary
+      if (e.altKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        if (isTtsSpeaking) {
+          handleStopTts();
+          setShortcutToast('[단축키 Alt+T] 음성 요약 재생이 중지되었습니다.');
+        } else if (analysisResult) {
+          handlePlayTts('all');
+          setShortcutToast('[단축키 Alt+T] AI 핵심 요약 음성 브리핑 재생 시작');
+        }
+        setTimeout(() => setShortcutToast(null), 2500);
+        return;
+      }
+
+      // 7. '?' or F1 -> Show Shortcuts Help
+      if (!isInputFocused && (e.key === '?' || e.key === 'F1')) {
+        e.preventDefault();
+        setShowShortcutHelpModal((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRecording, isPaused, recordingSeconds, transcriptText, isAnalyzing, isEditingAnalysis, isTtsSpeaking, analysisResult]);
 
   // Voice recording toggle
   const toggleRecording = async () => {
@@ -401,6 +560,13 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         transmitInsightToDashboard(data.result);
       }
 
+      // Auto-play TTS voice summary if enabled
+      if (autoPlayTtsOnComplete) {
+        setTimeout(() => {
+          handlePlayTts(undefined, data.result);
+        }, 500);
+      }
+
       try {
         confetti({
           particleCount: 50,
@@ -413,6 +579,111 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setErrorMessage(err.message || '서버와의 통신 중 오류가 발생했습니다.');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  // Text-To-Speech (TTS) Engine for Social Workers on the move
+  const handlePlayTts = (customSection?: 'all' | 'summary' | 'needs' | 'opinion', targetResult?: AIAnalysisResponse) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      alert('현재 브라우저 환경에서 음성 출력(TTS)을 지원하지 않습니다.');
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const res = targetResult || analysisResult;
+    if (!res) return;
+
+    const targetClient = clients.find((c) => c.id === targetClientId);
+    const clientName = targetClient ? `${targetClient.name} 어르신` : '상담 어르신';
+
+    let speechText = '';
+    const section = customSection || 'all';
+    setTtsActiveSection(section);
+
+    if (section === 'summary' || section === 'all') {
+      const summaryLines = res.executiveSummary || [];
+      speechText += `사례관리 AI 핵심 요약 음성 브리핑입니다. 대상자: ${clientName}, 판정 위기도는 ${res.riskLevel}입니다. `;
+      if (summaryLines.length > 0) {
+        speechText += `첫째, ${summaryLines[0]}. `;
+        if (summaryLines[1]) speechText += `둘째, ${summaryLines[1]}. `;
+        if (summaryLines[2]) speechText += `셋째, ${summaryLines[2]}. `;
+      }
+    }
+
+    if (section === 'needs' || (section === 'all' && res.primaryNeeds?.length)) {
+      speechText += `도출된 주요 복지 욕구는 ${res.primaryNeeds?.join(', ')} 입니다. `;
+      if (res.recommendedServices?.length) {
+        speechText += `추천 연계 서비스는 ${res.recommendedServices.map((s) => s.serviceName).join(', ')} 입니다. `;
+      }
+    }
+
+    if (section === 'opinion' || (section === 'all' && res.socialWorkerOpinion)) {
+      speechText += `사회복지사 종합 소견: ${res.socialWorkerOpinion}. `;
+    }
+
+    speechText += `이상으로 이동 중 음성 브리핑을 마칩니다.`;
+
+    const utterance = new SpeechSynthesisUtterance(speechText);
+    utterance.lang = 'ko-KR';
+    utterance.rate = ttsRate;
+    utterance.volume = ttsVolume;
+    utterance.pitch = 1.0;
+
+    // Select Korean voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const koVoice = voices.find((v) => v.lang.includes('ko') || v.lang.includes('KR') || v.name.includes('Korean') || v.name.includes('Yuna'));
+    if (koVoice) {
+      utterance.voice = koVoice;
+    }
+
+    utterance.onstart = () => {
+      setIsTtsSpeaking(true);
+      setIsTtsPaused(false);
+    };
+
+    utterance.onend = () => {
+      setIsTtsSpeaking(false);
+      setIsTtsPaused(false);
+      setTtsActiveSection('');
+    };
+
+    utterance.onerror = (e) => {
+      console.warn('TTS error occurred:', e);
+      setIsTtsSpeaking(false);
+      setIsTtsPaused(false);
+      setTtsActiveSection('');
+    };
+
+    ttsUtteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handlePauseTts = () => {
+    if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause();
+      setIsTtsPaused(true);
+    }
+  };
+
+  const handleResumeTts = () => {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+      setIsTtsPaused(false);
+    }
+  };
+
+  const handleStopTts = () => {
+    window.speechSynthesis.cancel();
+    setIsTtsSpeaking(false);
+    setIsTtsPaused(false);
+    setTtsActiveSection('');
+  };
+
+  const handleChangeTtsRate = (newRate: number) => {
+    setTtsRate(newRate);
+    if (isTtsSpeaking) {
+      handlePlayTts(ttsActiveSection as any);
     }
   };
 
@@ -520,12 +791,6 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     navigator.clipboard.writeText(transcriptText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const formatTimer = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const remainder = secs % 60;
-    return `${mins.toString().padStart(2, '0')}:${remainder.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -1013,10 +1278,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   onClick={toggleRecording}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
                     isRecording
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse ring-2 ring-rose-400'
                       : 'bg-amber-700 hover:bg-amber-600 text-white'
                   }`}
-                  title="브라우저 마이크 음성 실시간 받아쓰기"
+                  title="브라우저 마이크 음성 실시간 받아쓰기 (단축키: Space / Alt+R)"
+                  aria-keyshortcuts="Space"
                 >
                   {isRecording ? (
                     <>
@@ -1026,7 +1292,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   ) : (
                     <>
                       <Mic className="w-3.5 h-3.5" />
-                      <span>현장 실시간 음성 녹음</span>
+                      <span>실시간 녹음 (Space)</span>
                     </>
                   )}
                 </button>
@@ -1042,10 +1308,33 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   </button>
                 )}
 
+                {/* 🎯 Key Segment Bookmark Button */}
+                <button
+                  type="button"
+                  onClick={() => handleMarkKeySegment()}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 transition-all cursor-pointer shadow-2xs"
+                  title="어르신 주요 호소/위험 징후 발화 지점 중요 북마크 (단축키: M)"
+                  aria-keyshortcuts="KeyM"
+                >
+                  <Star className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 fill-amber-500" />
+                  <span>중요구간 마킹 (M)</span>
+                </button>
+
+                {/* Keyboard Shortcuts Info Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowShortcutHelpModal(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 border border-stone-200 dark:border-stone-700 hover:bg-stone-200 transition-colors cursor-pointer"
+                  title="단축키 가이드 보기 (?)"
+                >
+                  <Keyboard className="w-3.5 h-3.5 text-stone-500" />
+                  <span className="hidden sm:inline">단축키</span>
+                </button>
+
                 {/* File Upload Button */}
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 border border-stone-300 dark:border-stone-700 cursor-pointer transition-colors">
+                <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 border border-stone-300 dark:border-stone-700 cursor-pointer transition-colors">
                   <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>텍스트/자막 파일 첨부</span>
+                  <span className="hidden sm:inline">파일 첨부</span>
                   <input
                     type="file"
                     accept=".txt,.vtt,.srt,.doc,.docx,.json,.csv"
@@ -1066,6 +1355,67 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Quick Shortcuts Accessibility Bar */}
+            <div className="flex flex-wrap items-center justify-between text-[11px] bg-stone-50 dark:bg-[#251F1C] px-3 py-1.5 rounded-lg border border-stone-200/80 dark:border-stone-800 text-stone-500 dark:text-stone-400 gap-2">
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 font-mono text-[10px] font-bold shadow-2xs">Space</kbd>
+                  <span>녹음 시작/중지</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 font-mono text-[10px] font-bold shadow-2xs">M</kbd>
+                  <span>중요구간 마킹</span>
+                </span>
+                <span className="flex items-center gap-1 hidden sm:flex">
+                  <kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 font-mono text-[10px] font-bold shadow-2xs">Ctrl+Enter</kbd>
+                  <span>AI 사정분석</span>
+                </span>
+                <span className="flex items-center gap-1 hidden md:flex">
+                  <kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 font-mono text-[10px] font-bold shadow-2xs">Alt+E</kbd>
+                  <span>직접수정</span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcutHelpModal(true)}
+                className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold hover:underline flex items-center gap-0.5"
+              >
+                <span>전체 단축키</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Bookmarks Display Area */}
+            {bookmarks.length > 0 && (
+              <div className="p-2.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                  <span className="flex items-center gap-1">
+                    <Bookmark className="w-3.5 h-3.5 text-amber-600" />
+                    마킹된 중요 발화 구간 ({bookmarks.length}개)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBookmarks([])}
+                    className="text-[10px] text-stone-400 hover:text-stone-600 cursor-pointer"
+                  >
+                    목록 지우기
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {bookmarks.map((bm) => (
+                    <span
+                      key={bm.id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-[#201A17] border border-amber-300 dark:border-amber-800 text-[11px] text-stone-800 dark:text-stone-200 shadow-2xs"
+                    >
+                      <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-400" />
+                      <span className="font-mono font-bold text-amber-800 dark:text-amber-300">{bm.timestamp}</span>
+                      <span>{bm.label.replace(`[${bm.timestamp}]`, '').trim()}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Real-time Voice Recording Active Banner */}
             {isRecording && (
@@ -1290,77 +1640,337 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           {analysisResult ? (
             <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs overflow-hidden sticky top-24 transition-colors">
               {/* Header banner */}
-              <div className="bg-gradient-to-r from-[#2F2520] to-[#251D19] text-white p-4 flex items-center justify-between border-b border-stone-800">
+              <div className="bg-gradient-to-r from-[#2F2520] to-[#251D19] text-white p-4 flex items-center justify-between border-b border-stone-800 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-400" />
                   <h3 className="text-sm font-bold">AI 사례 사정 브리핑 & 추천 계획</h3>
                 </div>
-                <span
-                  className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
-                    analysisResult.riskLevel.includes('고')
-                      ? 'bg-rose-950 text-rose-300 border-rose-700'
-                      : analysisResult.riskLevel.includes('중')
-                      ? 'bg-amber-950 text-amber-300 border-amber-700'
-                      : 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                  }`}
-                >
-                  위기도: {analysisResult.riskLevel}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingAnalysis(!isEditingAnalysis)}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
+                      isEditingAnalysis
+                        ? 'bg-amber-500 text-stone-900 border-amber-400 shadow-xs'
+                        : 'bg-stone-800 text-amber-300 border-stone-700 hover:bg-stone-700'
+                    }`}
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>{isEditingAnalysis ? '수정 완료 (미리보기)' : '분석 결과 직접 수정하기'}</span>
+                  </button>
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                      analysisResult.riskLevel.includes('고')
+                        ? 'bg-rose-950 text-rose-300 border-rose-700'
+                        : analysisResult.riskLevel.includes('중')
+                        ? 'bg-amber-950 text-amber-300 border-amber-700'
+                        : 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                    }`}
+                  >
+                    위기도: {analysisResult.riskLevel}
+                  </span>
+                </div>
               </div>
 
               <div className="p-5 space-y-4 max-h-[calc(100vh-220px)] overflow-y-auto">
-                {/* 3-line Executive Summary */}
-                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl p-3.5">
-                  <h4 className="text-xs font-bold text-amber-900 dark:text-amber-300 mb-2 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-                    사회복지사 핵심 요약 브리핑
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {analysisResult.executiveSummary.map((item, idx) => (
-                      <li key={idx} className="text-xs text-amber-950 dark:text-amber-200 flex items-start gap-1.5 leading-relaxed">
-                        <span className="text-amber-600 font-bold shrink-0">•</span>
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* Risk Rationale */}
-                {analysisResult.riskRationale && (
-                  <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/70 dark:border-rose-900/50 rounded-lg">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-rose-900 dark:text-rose-300 mb-1">
-                      <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                      위기도 판정 근거 및 위험요인
+                {/* Manual Correction Mode Info Banner */}
+                {isEditingAnalysis && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 rounded-xl text-xs space-y-1 text-amber-900 dark:text-amber-200">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Edit3 className="w-4 h-4 text-amber-600" />
+                      <span>사용자 직접 수정 모드가 켜져 있습니다.</span>
                     </div>
-                    <p className="text-xs text-rose-950 dark:text-rose-200 leading-relaxed">
-                      {analysisResult.riskRationale}
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                      녹취나 텍스트에서 AI가 분석한 내용 중 오차나 오류가 있는 부분을 자유롭게 수정하거나 추가하세요. 수정된 내용은 서식 편집기 및 3줄 요약에 즉시 반영됩니다.
                     </p>
                   </div>
                 )}
+                {/* 🎧 TTS Voice Player for Social Workers on the move */}
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-teal-500/10 to-amber-500/10 dark:from-amber-950/40 dark:via-teal-950/40 dark:to-amber-950/40 border border-amber-300/80 dark:border-amber-700/70 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-amber-600 text-white shadow-xs">
+                        <Headphones className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                          <span>현장 이동 중 AI 음성 브리핑 (TTS)</span>
+                          {isTtsSpeaking && !isTtsPaused && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-300 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              음성 재생 중
+                            </span>
+                          )}
+                          {isTtsPaused && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold border border-amber-300">
+                              일시 정지
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                          신체·정서·조치계획 핵심 요약을 음성으로 들으며 다음 방문지로 이동하세요.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="hidden sm:flex items-center gap-1 text-[10px] text-stone-600 dark:text-stone-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoPlayTtsOnComplete}
+                        onChange={(e) => setAutoPlayTtsOnComplete(e.target.checked)}
+                        className="w-3 h-3 rounded text-amber-600 focus:ring-amber-500"
+                      />
+                      <span>분석 완료 시 자동재생</span>
+                    </label>
+                  </div>
+
+                  {/* Audio Controls Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-amber-200/60 dark:border-amber-800/40">
+                    <div className="flex items-center gap-1.5">
+                      {!isTtsSpeaking || isTtsPaused ? (
+                        <button
+                          type="button"
+                          onClick={() => (isTtsPaused ? handleResumeTts() : handlePlayTts('all'))}
+                          className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>{isTtsPaused ? '이어듣기' : '전체 요약 듣기'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handlePauseTts}
+                          className="px-3 py-1.5 rounded-lg bg-amber-800 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Pause className="w-3.5 h-3.5 fill-current" />
+                          <span>일시 정지</span>
+                        </button>
+                      )}
+
+                      {isTtsSpeaking && (
+                        <button
+                          type="button"
+                          onClick={handleStopTts}
+                          className="p-1.5 rounded-lg bg-stone-200 dark:bg-stone-800 hover:bg-stone-300 text-stone-700 dark:text-stone-300 text-xs transition-colors cursor-pointer"
+                          title="음성 정지"
+                        >
+                          <VolumeX className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {/* Section Quick Jump Buttons */}
+                      <button
+                        type="button"
+                        onClick={() => handlePlayTts('summary')}
+                        className={`px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors cursor-pointer ${
+                          ttsActiveSection === 'summary' && isTtsSpeaking
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
+                        }`}
+                      >
+                        3줄요약만
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePlayTts('opinion')}
+                        className={`px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors cursor-pointer ${
+                          ttsActiveSection === 'opinion' && isTtsSpeaking
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300'
+                        }`}
+                      >
+                        종합소견만
+                      </button>
+                    </div>
+
+                    {/* Speed Selector */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-stone-500 dark:text-stone-400 font-medium">배속:</span>
+                      {[0.9, 1.0, 1.2, 1.5].map((rate) => (
+                        <button
+                          key={rate}
+                          type="button"
+                          onClick={() => handleChangeTtsRate(rate)}
+                          className={`px-1.5 py-0.5 text-[10px] font-bold rounded transition-colors cursor-pointer ${
+                            ttsRate === rate
+                              ? 'bg-amber-600 text-white'
+                              : 'bg-white/80 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-100'
+                          }`}
+                        >
+                          {rate}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3-line Executive Summary */}
+                <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl p-3.5">
+                  <h4 className="text-xs font-bold text-amber-900 dark:text-amber-300 mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                      사회복지사 핵심 요약 브리핑
+                    </span>
+                    {isEditingAnalysis && (
+                      <span className="text-[10px] text-amber-700 dark:text-amber-400 font-normal">
+                        (각 항목을 직접 수정하세요)
+                      </span>
+                    )}
+                  </h4>
+                  {isEditingAnalysis ? (
+                    <div className="space-y-2">
+                      {analysisResult.executiveSummary.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5">
+                          <span className="text-amber-600 font-bold text-xs shrink-0">•</span>
+                          <input
+                            type="text"
+                            value={item}
+                            onChange={(e) => {
+                              const updated = [...analysisResult.executiveSummary];
+                              updated[idx] = e.target.value;
+                              setAnalysisResult({ ...analysisResult, executiveSummary: updated });
+                            }}
+                            className="w-full text-xs p-1.5 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-[#1E1916] text-stone-900 dark:text-stone-100"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {analysisResult.executiveSummary.map((item, idx) => (
+                        <li key={idx} className="text-xs text-amber-950 dark:text-amber-200 flex items-start gap-1.5 leading-relaxed">
+                          <span className="text-amber-600 font-bold shrink-0">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Risk Level & Risk Rationale */}
+                <div className="p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/70 dark:border-rose-900/50 rounded-lg space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-rose-900 dark:text-rose-300">
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                      위기도 판정 근거 및 위험요인
+                    </div>
+                    {isEditingAnalysis && (
+                      <div className="flex items-center gap-1">
+                        {['고위험', '중위험', '일반'].map((level) => (
+                          <button
+                            key={level}
+                            type="button"
+                            onClick={() => setAnalysisResult({ ...analysisResult, riskLevel: level })}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-colors cursor-pointer ${
+                              analysisResult.riskLevel === level
+                                ? 'bg-rose-600 text-white border-rose-700'
+                                : 'bg-white dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-300'
+                            }`}
+                          >
+                            {level}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {isEditingAnalysis ? (
+                    <textarea
+                      rows={2}
+                      value={analysisResult.riskRationale || ''}
+                      onChange={(e) => setAnalysisResult({ ...analysisResult, riskRationale: e.target.value })}
+                      className="w-full text-xs p-1.5 rounded border border-rose-300 dark:border-rose-800 bg-white dark:bg-[#1E1916] text-stone-900 dark:text-stone-100 leading-relaxed"
+                    />
+                  ) : (
+                    <p className="text-xs text-rose-950 dark:text-rose-200 leading-relaxed">
+                      {analysisResult.riskRationale || '신체 건강 및 주거 안전 위험 요인 존재.'}
+                    </p>
+                  )}
+                </div>
 
                 {/* Primary Needs */}
                 <div>
-                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-2 flex items-center gap-1.5">
-                    <ListPlus className="w-3.5 h-3.5 text-stone-500" />
-                    도출된 주요 어르신 욕구 및 과제 ({analysisResult.primaryNeeds?.length || 0}건)
-                  </h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysisResult.primaryNeeds?.map((need, idx) => (
-                      <span
-                        key={idx}
-                        className="text-xs px-2.5 py-1 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700"
+                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <ListPlus className="w-3.5 h-3.5 text-stone-500" />
+                      도출된 주요 어르신 욕구 및 과제 ({analysisResult.primaryNeeds?.length || 0}건)
+                    </span>
+                    {isEditingAnalysis && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = [...(analysisResult.primaryNeeds || []), '새로운 욕구 항목'];
+                          setAnalysisResult({ ...analysisResult, primaryNeeds: updated });
+                        }}
+                        className="text-[10px] px-2 py-0.5 rounded bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-300 cursor-pointer font-semibold"
                       >
-                        {need}
-                      </span>
-                    ))}
-                  </div>
+                        + 욕구 추가
+                      </button>
+                    )}
+                  </h4>
+                  {isEditingAnalysis ? (
+                    <div className="space-y-1.5">
+                      {analysisResult.primaryNeeds?.map((need, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={need}
+                            onChange={(e) => {
+                              const updated = [...(analysisResult.primaryNeeds || [])];
+                              updated[idx] = e.target.value;
+                              setAnalysisResult({ ...analysisResult, primaryNeeds: updated });
+                            }}
+                            className="w-full text-xs p-1.5 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916] text-stone-900 dark:text-stone-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = analysisResult.primaryNeeds?.filter((_, i) => i !== idx);
+                              setAnalysisResult({ ...analysisResult, primaryNeeds: updated });
+                            }}
+                            className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950 rounded text-xs"
+                            title="삭제"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {analysisResult.primaryNeeds?.map((need, idx) => (
+                        <span
+                          key={idx}
+                          className="text-xs px-2.5 py-1 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700"
+                        >
+                          {need}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Recommended Care Services */}
                 <div>
-                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-2 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    추천 재가노인지원 맞춤형 서비스
+                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-500" />
+                      추천 재가노인지원 맞춤형 서비스
+                    </span>
+                    {isEditingAnalysis && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = [
+                            ...(analysisResult.recommendedServices || []),
+                            { serviceName: '신규 지원 서비스', frequency: '주 1회', purpose: '일상 지원 및 안부 확인' },
+                          ];
+                          setAnalysisResult({ ...analysisResult, recommendedServices: updated });
+                        }}
+                        className="text-[10px] px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 font-semibold cursor-pointer"
+                      >
+                        + 서비스 추가
+                      </button>
+                    )}
                   </h4>
                   <div className="space-y-2">
                     {analysisResult.recommendedServices?.map((svc, idx) => (
@@ -1368,15 +1978,67 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                         key={idx}
                         className="p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50/70 dark:bg-[#251F1C] text-xs"
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-stone-800 dark:text-stone-200">{svc.serviceName}</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 font-semibold">
-                            {svc.frequency}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-stone-600 dark:text-stone-400">
-                          {svc.purpose}
-                        </p>
+                        {isEditingAnalysis ? (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={svc.serviceName}
+                                onChange={(e) => {
+                                  const updated = [...(analysisResult.recommendedServices || [])];
+                                  updated[idx] = { ...updated[idx], serviceName: e.target.value };
+                                  setAnalysisResult({ ...analysisResult, recommendedServices: updated });
+                                }}
+                                placeholder="서비스명"
+                                className="w-full text-xs font-bold p-1 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916]"
+                              />
+                              <input
+                                type="text"
+                                value={svc.frequency}
+                                onChange={(e) => {
+                                  const updated = [...(analysisResult.recommendedServices || [])];
+                                  updated[idx] = { ...updated[idx], frequency: e.target.value };
+                                  setAnalysisResult({ ...analysisResult, recommendedServices: updated });
+                                }}
+                                placeholder="주기"
+                                className="w-24 text-xs p-1 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = analysisResult.recommendedServices?.filter((_, i) => i !== idx);
+                                  setAnalysisResult({ ...analysisResult, recommendedServices: updated });
+                                }}
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              value={svc.purpose}
+                              onChange={(e) => {
+                                  const updated = [...(analysisResult.recommendedServices || [])];
+                                  updated[idx] = { ...updated[idx], purpose: e.target.value };
+                                  setAnalysisResult({ ...analysisResult, recommendedServices: updated });
+                              }}
+                              placeholder="목적 및 내용"
+                              className="w-full text-[11px] p-1 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916]"
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-stone-800 dark:text-stone-200">{svc.serviceName}</span>
+                              <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 font-semibold">
+                                {svc.frequency}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-stone-600 dark:text-stone-400">
+                              {svc.purpose}
+                            </p>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1384,13 +2046,24 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
 
                 {/* Social Worker Opinion Preview */}
                 <div>
-                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-1 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-amber-700" />
-                    사회복지사 종합소견 초안
+                  <h4 className="text-xs font-bold text-stone-700 dark:text-stone-300 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-amber-700" />
+                      사회복지사 종합소견 {isEditingAnalysis ? '직접 수정' : '초안'}
+                    </span>
                   </h4>
-                  <p className="text-xs text-stone-700 dark:text-stone-300 bg-stone-50 dark:bg-[#251F1C] p-2.5 rounded border border-stone-200 dark:border-stone-700 leading-relaxed">
-                    {analysisResult.socialWorkerOpinion}
-                  </p>
+                  {isEditingAnalysis ? (
+                    <textarea
+                      rows={4}
+                      value={analysisResult.socialWorkerOpinion}
+                      onChange={(e) => setAnalysisResult({ ...analysisResult, socialWorkerOpinion: e.target.value })}
+                      className="w-full text-xs text-stone-900 dark:text-stone-100 bg-white dark:bg-[#1E1916] p-2.5 rounded border border-amber-400 dark:border-amber-600 leading-relaxed focus:ring-2 focus:ring-amber-500"
+                    />
+                  ) : (
+                    <p className="text-xs text-stone-700 dark:text-stone-300 bg-stone-50 dark:bg-[#251F1C] p-2.5 rounded border border-stone-200 dark:border-stone-700 leading-relaxed">
+                      {analysisResult.socialWorkerOpinion}
+                    </p>
+                  )}
                 </div>
 
                 {/* 3-Line Summary Dashboard Transmission Section */}
@@ -1467,6 +2140,98 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           )}
         </div>
       </div>
+      )}
+      {/* Shortcut Toast Notification */}
+      {shortcutToast && (
+        <div className="fixed top-20 right-6 z-50 bg-stone-900/95 dark:bg-stone-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-xl border border-amber-500/50 flex items-center gap-2 animate-slide-in backdrop-blur-xs">
+          <Keyboard className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="font-medium">{shortcutToast}</span>
+        </div>
+      )}
+
+      {/* Keyboard Shortcuts Accessibility Help Modal */}
+      {showShortcutHelpModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#1E1916] rounded-2xl max-w-md w-full border border-stone-300 dark:border-stone-700 shadow-2xl overflow-hidden animate-fade-in">
+            <div className="px-5 py-4 bg-stone-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold">키보드 접근성 단축키 안내</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcutHelpModal(false)}
+                className="p-1 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs">
+              <p className="text-stone-600 dark:text-stone-300">
+                마우스 없이 키보드만으로 상담 녹취를 신속하게 제어하고 중요 구간을 마킹할 수 있습니다.
+              </p>
+
+              <div className="space-y-2 divide-y divide-stone-100 dark:divide-stone-800">
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">실시간 녹음 시작 / 중지</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Space</kbd>
+                    <span className="text-stone-400">또는</span>
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Alt+R</kbd>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">중요 발화 / 위험구간 마킹</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">M</kbd>
+                    <span className="text-stone-400">또는</span>
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Alt+M</kbd>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">AI 서식 사정분석 즉시 실행</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Ctrl+Enter</kbd>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">분석 결과 직접 수정 모드 토글</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Alt+E</kbd>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">AI 요약 음성 브리핑(TTS) 재생/정지</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">Alt+T</kbd>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-1.5">
+                  <span className="font-medium text-stone-700 dark:text-stone-200">단축키 도움말 열기/닫기</span>
+                  <div className="flex items-center gap-1">
+                    <kbd className="px-2 py-1 bg-stone-100 dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded font-mono font-bold text-stone-800 dark:text-stone-200">?</kbd>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-stone-200 dark:border-stone-800 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowShortcutHelpModal(false)}
+                  className="px-4 py-2 rounded-xl bg-amber-700 hover:bg-amber-600 text-white font-bold text-xs cursor-pointer shadow-xs"
+                >
+                  확인 완료 (ESC)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

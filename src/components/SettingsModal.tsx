@@ -18,7 +18,10 @@ import {
   UploadCloud,
   FileCheck,
   LogOut,
-  LogIn
+  LogIn,
+  Clock,
+  Bell,
+  BellRing
 } from 'lucide-react';
 import { UserSettings, GoogleAuthUser } from '../types';
 import { googleDriveService } from '../utils/googleDriveService';
@@ -34,6 +37,7 @@ interface SettingsModalProps {
   onSignOutGoogle: () => void;
   onBackupToDrive?: () => void;
   isBackingUp?: boolean;
+  onOpenScheduler?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -46,6 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSignOutGoogle,
   onBackupToDrive,
   isBackingUp = false,
+  onOpenScheduler,
 }) => {
   const [form, setForm] = useState<UserSettings>({ ...settings });
   const [activeTab, setActiveTab] = useState<'general' | 'approval' | 'gdrive' | 'dashboard'>('general');
@@ -454,20 +459,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </p>
                 </div>
 
+                {/* Auto Sync Cloud Scheduler Settings */}
+                <div className="p-3.5 rounded-xl border border-amber-300/80 dark:border-amber-700/80 bg-amber-50/70 dark:bg-[#2A211B] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                      <div>
+                        <div className="font-bold text-xs text-stone-900 dark:text-stone-100">
+                          정기 자동 동기화 스케줄러 (매일 정해진 시간 자동 백업)
+                        </div>
+                        <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                          퇴근 시간이나 지정된 시각에 모든 사례관리 데이터를 자동으로 백업하고 알림을 보냅니다.
+                        </p>
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={form.autoSyncEnabled ?? true}
+                      onChange={(e) => setForm({ ...form, autoSyncEnabled: e.target.checked })}
+                      className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                    />
+                  </div>
+
+                  {(form.autoSyncEnabled ?? true) && (
+                    <div className="pt-2 border-t border-amber-200 dark:border-amber-900/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-stone-600 dark:text-stone-400 font-semibold">매일 실행 시각:</span>
+                        <input
+                          type="time"
+                          value={form.autoSyncTime || '18:00'}
+                          onChange={(e) => setForm({ ...form, autoSyncTime: e.target.value })}
+                          className="px-2.5 py-1 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1815] font-mono font-bold text-xs"
+                        />
+                      </div>
+
+                      {onOpenScheduler && (
+                        <button
+                          type="button"
+                          onClick={onOpenScheduler}
+                          className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>스케줄러 세부 관리</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-[#251E1A]">
                   <div>
                     <div className="font-bold text-xs text-stone-900 dark:text-stone-100">
-                      서식 저장 시 구글 드라이브 자동 백업
+                      서식 저장 시 실시간 구글 드라이브 동기화
                     </div>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                      사회복지사가 서식을 저장할 때마다 실시간으로 구글 드라이브에 안전하게 동기화합니다.
+                      사회복지사가 개별 서식을 저장할 때마다 실시간으로 구글 드라이브에 안전하게 동기화합니다.
                     </p>
                   </div>
                   <input
                     type="checkbox"
                     checked={form.autoBackupToDrive}
                     onChange={(e) => setForm({ ...form, autoBackupToDrive: e.target.checked })}
-                    className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500"
+                    className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
                   />
                 </div>
 

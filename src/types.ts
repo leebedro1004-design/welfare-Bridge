@@ -435,6 +435,19 @@ export interface PresetScenario {
   workerNotes: string;
 }
 
+export interface SyncHistoryItem {
+  id: string;
+  timestamp: string;
+  status: 'success' | 'failed';
+  docCount: number;
+  clientCount: number;
+  fileSize: string;
+  fileName: string;
+  folderName: string;
+  message: string;
+  triggerType: 'scheduled' | 'manual' | 'auto_save';
+}
+
 export interface UserSettings {
   institutionName: string;
   agencyName?: string; // alias for institutionName
@@ -451,6 +464,14 @@ export interface UserSettings {
   driveFolderName: string;
   autoBackupToDrive: boolean;
   dashboardPanelOrder: string[];
+  
+  // Auto Sync Cloud Scheduler Settings
+  autoSyncEnabled?: boolean;
+  autoSyncTime?: string; // e.g., "18:00"
+  autoSyncInterval?: 'daily' | 'hourly' | 'every_6_hours';
+  pushNotificationEnabled?: boolean;
+  lastAutoSyncTime?: string;
+  lastAutoSyncStatus?: 'success' | 'failed' | 'idle';
 }
 
 

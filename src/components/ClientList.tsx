@@ -14,15 +14,26 @@ import {
   Plus,
   X,
   Clock,
-  HeartHandshake
+  HeartHandshake,
+  Siren,
+  PhoneCall,
+  MessageSquare,
+  AlertOctagon,
+  Copy,
+  Check,
+  Activity,
+  Eye,
+  ShieldCheck,
+  Building
 } from 'lucide-react';
-import { ClientProfile, RiskLevel, LivingType, WelfareType } from '../types';
+import { ClientProfile, RiskLevel, LivingType, WelfareType, DocumentType } from '../types';
+import { ClientConsultationTimeline } from './ClientConsultationTimeline';
 
 interface ClientListProps {
   clients: ClientProfile[];
   onAddClient: (newClient: ClientProfile) => void;
   onSelectClientForConsultation: (client: ClientProfile) => void;
-  onSelectClientForForm: (client: ClientProfile) => void;
+  onSelectClientForForm: (client: ClientProfile, docType?: DocumentType) => void;
 }
 
 export const ClientList: React.FC<ClientListProps> = ({
@@ -35,6 +46,10 @@ export const ClientList: React.FC<ClientListProps> = ({
   const [riskFilter, setRiskFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [selectedDetailClient, setSelectedDetailClient] = useState<ClientProfile | null>(null);
+  const [detailModalTab, setDetailModalTab] = useState<'info' | 'timeline' | 'emergency'>('timeline');
+  const [copiedInfoToast, setCopiedInfoToast] = useState<string | null>(null);
+  const [emergencyLoggedToast, setEmergencyLoggedToast] = useState<string | null>(null);
 
   // New Client Form State
   const [newName, setNewName] = useState<string>('');
@@ -92,9 +107,38 @@ export const ClientList: React.FC<ClientListProps> = ({
 
     onAddClient(newClient);
     setIsAddModalOpen(false);
-    // Reset form
     setNewName('');
     setNewAddress('');
+  };
+
+  // 119 Emergency Quick Dispatch Copy & Call
+  const handleEmergency119 = (client: ClientProfile) => {
+    const dispatchBrief = `[119 응급환자 구조 요청 정보]\n- 대상자: ${client.name} (${client.age}세, ${client.gender})\n- 주소지: ${client.address}\n- 보호자 연락처: ${client.emergencyContact.name} (${client.emergencyContact.phone})\n- 보유 기저질환: ${client.chronicDiseases.join(', ')}\n- 장기요양상태: ${client.longTermCareStatus}\n- 담당 복지관: 굿실버노인복지센터 (02-2600-1111)`;
+    navigator.clipboard.writeText(dispatchBrief);
+    setCopiedInfoToast(`119 출동용 어르신 주소 및 질환 정보가 클립보드에 복사되었습니다! (119 즉시 통화 연결)`);
+    setTimeout(() => setCopiedInfoToast(null), 4000);
+    window.location.href = 'tel:119';
+  };
+
+  // Guardian Emergency Call
+  const handleCallGuardian = (client: ClientProfile) => {
+    const phone = client.emergencyContact.phone.replace(/[^0-9]/g, '');
+    window.location.href = `tel:${phone || '010-0000-0000'}`;
+  };
+
+  // Guardian SMS Emergency Alert
+  const handleSmsGuardian = (client: ClientProfile) => {
+    const phone = client.emergencyContact.phone.replace(/[^0-9]/g, '');
+    const message = `[재가노인지원센터 긴급연락] ${client.name} 어르신 댁 방문 중 긴급 확인이 필요하여 연락드립니다. 확인 즉시 담당 사회복지사에게 연락 부탁드립니다.`;
+    window.location.href = `sms:${phone}?body=${encodeURIComponent(message)}`;
+    setCopiedInfoToast(`보호자 긴급 문자 발송 화면으로 연결되었습니다.`);
+    setTimeout(() => setCopiedInfoToast(null), 3000);
+  };
+
+  // Log Emergency Action
+  const handleLogEmergency = (client: ClientProfile, type: string) => {
+    setEmergencyLoggedToast(`[${new Date().toLocaleTimeString('ko-KR')}] ${client.name} 어르신에 대한 '${type}' 긴급 대처 이력이 시스템에 기록되었습니다.`);
+    setTimeout(() => setEmergencyLoggedToast(null), 4000);
   };
 
   return (
@@ -250,29 +294,375 @@ export const ClientList: React.FC<ClientListProps> = ({
               </div>
 
               {/* Bottom Quick Action CTAs */}
-              <div className="border-t border-stone-100 bg-stone-50/80 p-3 grid grid-cols-2 gap-2">
+              <div className="border-t border-stone-100 bg-stone-50/80 p-3 space-y-2">
                 <button
                   type="button"
-                  onClick={() => onSelectClientForConsultation(client)}
-                  className="py-2 px-2.5 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/80 hover:bg-amber-200/90 border border-amber-300 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                  onClick={() => setSelectedDetailClient(client)}
+                  className="w-full py-2 px-2.5 rounded-xl text-xs font-bold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-700" />
-                  <span>AI 녹취분석</span>
+                  <Siren className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
+                  <span>상세정보 & 긴급상황 대처</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => onSelectClientForForm(client)}
-                  className="py-2 px-2.5 rounded-xl text-xs font-bold text-stone-700 bg-white hover:bg-stone-100 border border-stone-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5 text-stone-500" />
-                  <span>서식 작성/보기</span>
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSelectClientForConsultation(client)}
+                    className="py-2 px-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-100/80 hover:bg-amber-200/90 border border-amber-300 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                    <span>AI 녹취분석</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onSelectClientForForm(client)}
+                    className="py-2 px-2 rounded-xl text-xs font-bold text-stone-700 bg-white hover:bg-stone-100 border border-stone-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-stone-500" />
+                    <span>서식 작성</span>
+                  </button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* 🚨 Client Detail & Emergency Response Modal */}
+      {selectedDetailClient && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800 w-full max-w-3xl shadow-2xl overflow-hidden animate-fade-in my-8">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-stone-50 dark:bg-[#251F1C]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 font-black flex items-center justify-center text-base border border-amber-300 shrink-0">
+                  {selectedDetailClient.name.slice(0, 1)}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
+                      {selectedDetailClient.name} 어르신 통합 프로필 & 과거 상담 이력
+                    </h3>
+                    <span className="text-xs text-stone-500 dark:text-stone-400 font-medium">
+                      ({selectedDetailClient.age}세, {selectedDetailClient.gender})
+                    </span>
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${
+                      selectedDetailClient.riskLevel === '고위험'
+                        ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300'
+                        : selectedDetailClient.riskLevel === '중위험'
+                        ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-300'
+                        : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    }`}>
+                      {selectedDetailClient.riskLevel}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    {selectedDetailClient.livingType} • {selectedDetailClient.welfareType} • 관리번호: {selectedDetailClient.id}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDetailClient(null)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200 dark:hover:bg-stone-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Navigation Tabs */}
+            <div className="px-6 pt-2.5 border-b border-stone-200 dark:border-stone-800 bg-stone-100/70 dark:bg-[#201B18] flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDetailModalTab('timeline')}
+                className={`px-3.5 py-2 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                  detailModalTab === 'timeline'
+                    ? 'border-amber-600 text-amber-900 dark:text-amber-300 bg-white dark:bg-[#1E1916] rounded-t-lg shadow-2xs'
+                    : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                <span>과거 상담 이력 타임라인</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDetailModalTab('info')}
+                className={`px-3.5 py-2 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                  detailModalTab === 'info'
+                    ? 'border-amber-600 text-amber-900 dark:text-amber-300 bg-white dark:bg-[#1E1916] rounded-t-lg shadow-2xs'
+                    : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 text-stone-500" />
+                <span>기본 인적·건강 정보</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDetailModalTab('emergency')}
+                className={`px-3.5 py-2 text-xs font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                  detailModalTab === 'emergency'
+                    ? 'border-rose-600 text-rose-900 dark:text-rose-300 bg-white dark:bg-[#1E1916] rounded-t-lg shadow-2xs'
+                    : 'border-transparent text-stone-500 hover:text-rose-600'
+                }`}
+              >
+                <Siren className="w-3.5 h-3.5 text-rose-600" />
+                <span>현장 긴급 대응 (119/보호자)</span>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[72vh] overflow-y-auto">
+              {/* TAB 1: CONSULTATION TIMELINE VIEW */}
+              {detailModalTab === 'timeline' && (
+                <ClientConsultationTimeline
+                  client={selectedDetailClient}
+                  onOpenDocument={(docType, cId) => {
+                    const client = selectedDetailClient;
+                    setSelectedDetailClient(null);
+                    onSelectClientForForm(client, docType);
+                  }}
+                  onStartNewConsultation={(client) => {
+                    setSelectedDetailClient(null);
+                    onSelectClientForConsultation(client);
+                  }}
+                />
+              )}
+
+              {/* TAB 2: GENERAL PROFILE INFORMATION */}
+              {detailModalTab === 'info' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs animate-fade-in">
+                  <div className="p-4 rounded-xl bg-stone-50 dark:bg-[#251F1C] border border-stone-200 dark:border-stone-800 space-y-2">
+                    <h4 className="font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-amber-600" />
+                      기본 인적사항 및 수급자격
+                    </h4>
+                    <div className="space-y-1.5 text-stone-700 dark:text-stone-300">
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">생년월일:</span>
+                        <span className="font-semibold">{selectedDetailClient.birthDate} ({selectedDetailClient.age}세)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">본인 연락처:</span>
+                        <span className="font-semibold">{selectedDetailClient.phone}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">주거 형태:</span>
+                        <span className="font-semibold">{selectedDetailClient.livingType}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">수급 자격:</span>
+                        <span className="font-semibold">{selectedDetailClient.welfareType}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">거주 주소:</span>
+                        <span className="font-semibold">{selectedDetailClient.address}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">담당 복지사:</span>
+                        <span className="font-semibold">{selectedDetailClient.caseWorker}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-stone-50 dark:bg-[#251F1C] border border-stone-200 dark:border-stone-800 space-y-2">
+                    <h4 className="font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <HeartPulse className="w-4 h-4 text-rose-600" />
+                      건강 질환 및 비상연락망
+                    </h4>
+                    <div className="space-y-1.5 text-stone-700 dark:text-stone-300">
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">비상연락인:</span>
+                        <span className="font-semibold">{selectedDetailClient.emergencyContact.name} ({selectedDetailClient.emergencyContact.relation})</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">비상연락처:</span>
+                        <span className="font-semibold">{selectedDetailClient.emergencyContact.phone}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">장기요양 인정:</span>
+                        <span className="font-semibold">{selectedDetailClient.longTermCareStatus}</span>
+                      </div>
+                      <div>
+                        <span className="text-stone-500 block mb-1">만성 질환:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {selectedDetailClient.chronicDiseases.map((d, i) => (
+                            <span key={i} className="px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 font-semibold text-[10px]">
+                              {d}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: EMERGENCY QUICK ACTIONS */}
+              {detailModalTab === 'emergency' && (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="rounded-2xl bg-gradient-to-r from-rose-900 via-red-900 to-rose-950 text-white p-5 shadow-lg border border-rose-700/80 space-y-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-rose-700/60 pb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-xl bg-rose-500 text-white animate-pulse">
+                          <Siren className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold flex items-center gap-2">
+                            <span>현장 긴급 상황 즉각 대처 (Emergency Quick Actions)</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-400/30 text-rose-200 border border-rose-400/40 font-bold">
+                              골든타임 대응
+                            </span>
+                          </h4>
+                          <p className="text-xs text-rose-200">
+                            낙상, 의식 저하, 급성 호흡곤란 발생 시 즉시 원클릭으로 119 및 보호자에게 연락합니다.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleLogEmergency(selectedDetailClient, '응급 일지 자동 기록')}
+                        className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-rose-100 border border-rose-400/30 transition-colors cursor-pointer shrink-0"
+                      >
+                        응급일지 기록
+                      </button>
+                    </div>
+
+                    {/* Emergency Action Buttons Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* 119 Rescue Call */}
+                      <button
+                        type="button"
+                        onClick={() => handleEmergency119(selectedDetailClient)}
+                        className="p-3.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer border border-rose-400"
+                      >
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <PhoneCall className="w-4 h-4 animate-bounce" />
+                          <span>119 구급대 긴급신고</span>
+                        </div>
+                        <span className="text-[10px] font-normal text-rose-100 text-center">
+                          주소·기저질환 브리핑 복사 & 통화
+                        </span>
+                      </button>
+
+                      {/* Guardian Call */}
+                      <button
+                        type="button"
+                        onClick={() => handleCallGuardian(selectedDetailClient)}
+                        className="p-3.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer border border-amber-400"
+                      >
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Phone className="w-4 h-4" />
+                          <span>보호자 즉시 통화</span>
+                        </div>
+                        <span className="text-[10px] font-normal text-amber-100 text-center">
+                          {selectedDetailClient.emergencyContact.name} ({selectedDetailClient.emergencyContact.phone})
+                        </span>
+                      </button>
+
+                      {/* Guardian SMS Alert */}
+                      <button
+                        type="button"
+                        onClick={() => handleSmsGuardian(selectedDetailClient)}
+                        className="p-3.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-white font-bold text-xs flex flex-col items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer border border-stone-600"
+                      >
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <MessageSquare className="w-4 h-4" />
+                          <span>보호자 긴급문자</span>
+                        </div>
+                        <span className="text-[10px] font-normal text-stone-300 text-center">
+                          위기상황 안내문 자동 완성
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Quick Info Strip for Emergency Services */}
+                    <div className="p-3 rounded-xl bg-black/30 border border-white/10 text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-rose-300">구급대 전달용 주소:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedDetailClient.address);
+                            setCopiedInfoToast('주소가 클립보드에 복사되었습니다.');
+                            setTimeout(() => setCopiedInfoToast(null), 2500);
+                          }}
+                          className="text-[10px] text-amber-300 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" /> 주소 복사
+                        </button>
+                      </div>
+                      <div className="text-white font-medium">{selectedDetailClient.address}</div>
+                      <div className="text-[11px] text-rose-200 pt-1 border-t border-white/10 flex items-center gap-2">
+                        <span>기저질환: <strong>{selectedDetailClient.chronicDiseases.join(', ')}</strong></span>
+                        <span>•</span>
+                        <span>장기요양: <strong>{selectedDetailClient.longTermCareStatus}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Bottom CTA */}
+            <div className="p-4 border-t border-stone-200 dark:border-stone-800 flex items-center justify-between bg-stone-50 dark:bg-[#251F1C]">
+              <button
+                type="button"
+                onClick={() => setSelectedDetailClient(null)}
+                className="px-4 py-2 text-xs font-medium rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-100 cursor-pointer"
+              >
+                닫기
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const client = selectedDetailClient;
+                    setSelectedDetailClient(null);
+                    onSelectClientForConsultation(client);
+                  }}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300 transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                  <span>AI 상담 녹취 시작</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const client = selectedDetailClient;
+                    setSelectedDetailClient(null);
+                    onSelectClientForForm(client);
+                  }}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-700 hover:bg-amber-600 text-white shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>표준 사례관리 서식 작성</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Emergency Action Copied Toast */}
+      {copiedInfoToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-rose-900 text-white text-xs px-5 py-3 rounded-2xl shadow-2xl border border-rose-400/60 flex items-center gap-2.5 animate-slide-in">
+          <Siren className="w-4 h-4 text-rose-300 shrink-0" />
+          <span className="font-medium">{copiedInfoToast}</span>
+        </div>
+      )}
+
+      {/* Emergency Action Logged Toast */}
+      {emergencyLoggedToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs px-5 py-3 rounded-2xl shadow-2xl border border-amber-400/60 flex items-center gap-2.5 animate-slide-in">
+          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="font-medium">{emergencyLoggedToast}</span>
+        </div>
+      )}
 
       {/* Add Client Modal */}
       {isAddModalOpen && (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Header, AppTab } from './components/Header';
+import { MainPortalHub } from './components/MainPortalHub';
 import { AIStudioTranscript } from './components/AIStudioTranscript';
 import { FormEditor } from './components/FormEditor';
 import { ClientList } from './components/ClientList';
@@ -8,9 +9,11 @@ import { SupervisionAdvisor } from './components/SupervisionAdvisor';
 import { ScheduleAlertBanner } from './components/ScheduleAlertBanner';
 import { ConsultationInsightsCard } from './components/ConsultationInsightsCard';
 import { VisitRoutePlanner } from './components/VisitRoutePlanner';
+import { RiskDiagnosticCard } from './components/RiskDiagnosticCard';
 import { DashboardManagerBar, DashboardPanelConfig } from './components/DashboardManagerBar';
 import { DashboardWindow } from './components/DashboardWindow';
 import { SettingsModal } from './components/SettingsModal';
+import { AutoSyncSchedulerModal } from './components/AutoSyncSchedulerModal';
 import {
   BellRing,
   BrainCircuit,
@@ -25,9 +28,11 @@ import {
   ShieldCheck,
   TrendingUp,
   Cloud,
-  CheckCircle2
+  CheckCircle2,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
-import { ClientProfile, CaseDocument, UserSettings, GoogleAuthUser, ConsultationInsight } from './types';
+import { ClientProfile, CaseDocument, UserSettings, GoogleAuthUser, ConsultationInsight, DocumentType } from './types';
 import { INITIAL_CLIENTS, INITIAL_DOCUMENTS } from './data/mockData';
 import { createEmptyDocument, DOCUMENT_TYPE_LABELS } from './utils/documentTemplates';
 import { googleDriveService } from './utils/googleDriveService';
@@ -47,11 +52,11 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   sealText: '도봉재가노인지원서비스센터장인',
   driveFolderName: 'CareBridge_사례관리_문서함',
   autoBackupToDrive: true,
-  dashboardPanelOrder: ['routes', 'insights'],
+  dashboardPanelOrder: ['riskDiagnostic', 'routes', 'insights'],
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<AppTab>('portal');
 
   // Persistent User Settings State
   const [userSettings, setUserSettings] = useState<UserSettings>(() => {
@@ -72,8 +77,10 @@ export default function App() {
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState<boolean>(false);
   const [isBackingUpToDrive, setIsBackingUpToDrive] = useState<boolean>(false);
   const [driveToast, setDriveToast] = useState<string | null>(null);
+  const [lastSyncResult, setLastSyncResult] = useState<{ success: boolean; message: string; timestamp?: string } | null>(null);
 
   // Live Consultation Insights state (synced with AIStudioTranscript)
   const [liveInsights, setLiveInsights] = useState<ConsultationInsight[]>(() => {
@@ -94,7 +101,7 @@ export default function App() {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return userSettings.dashboardPanelOrder || ['routes', 'insights'];
+    return userSettings.dashboardPanelOrder || ['riskDiagnostic', 'routes', 'insights'];
   });
 
   // Persistent Clients State
@@ -140,6 +147,14 @@ export default function App() {
       isMinimized: false,
       icon: <BellRing className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />,
       badgeCount: 2,
+    },
+    riskDiagnostic: {
+      id: 'riskDiagnostic',
+      name: '위험도 AI 진단서',
+      isOpen: true,
+      isMinimized: false,
+      icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />,
+      badgeCount: 3,
     },
     routes: {
       id: 'routes',
@@ -206,15 +221,89 @@ export default function App() {
     setTimeout(() => setDriveToast(null), 3000);
   };
 
+  // Auto Sync Cloud Scheduler Background Loop
+  useEffect(() => {
+    const checkAutoSync = async () => {
+      if (!userSettings.autoSyncEnabled) return;
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, '0');
+      const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${currentHours}:${currentMinutes}`;
+      const todayDateStr = now.toISOString().slice(0, 10);
+      const lastSyncDate = localStorage.getItem('carebridge_last_scheduled_sync_date');
+      const scheduledTime = userSettings.autoSyncTime || '18:00';
+
+      let shouldTrigger = false;
+
+      if (userSettings.autoSyncInterval === 'hourly') {
+        const lastHour = localStorage.getItem('carebridge_last_scheduled_sync_hour');
+        const currentHourStr = `${todayDateStr}_${currentHours}`;
+        if (lastHour !== currentHourStr) {
+          shouldTrigger = true;
+          localStorage.setItem('carebridge_last_scheduled_sync_hour', currentHourStr);
+        }
+      } else if (userSettings.autoSyncInterval === 'every_6_hours') {
+        const last6Hour = localStorage.getItem('carebridge_last_scheduled_sync_6hour');
+        const block = Math.floor(now.getHours() / 6);
+        const current6HourStr = `${todayDateStr}_block_${block}`;
+        if (last6Hour !== current6HourStr) {
+          shouldTrigger = true;
+          localStorage.setItem('carebridge_last_scheduled_sync_6hour', current6HourStr);
+        }
+      } else {
+        // Daily scheduled check at exact HH:MM
+        if (currentTimeStr === scheduledTime && lastSyncDate !== todayDateStr) {
+          shouldTrigger = true;
+          localStorage.setItem('carebridge_last_scheduled_sync_date', todayDateStr);
+        }
+      }
+
+      if (shouldTrigger && !isBackingUpToDrive) {
+        console.log(`[AutoSyncScheduler] Triggering scheduled Google Drive backup at ${currentTimeStr}`);
+        setIsBackingUpToDrive(true);
+        try {
+          const res = await googleDriveService.backupAllDataToDrive(
+            documents,
+            clients,
+            userSettings.driveFolderName,
+            'scheduled'
+          );
+          setLastSyncResult({
+            success: res.success,
+            message: res.message,
+            timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+          });
+          if (res.success) {
+            setDriveToast(`[정기 자동 백업 완료] Google Drive에 ${documents.length}건 서식이 안전하게 백업되었습니다.`);
+          }
+        } catch (e: any) {
+          console.error('Scheduled backup error:', e);
+        } finally {
+          setIsBackingUpToDrive(false);
+          setTimeout(() => setDriveToast(null), 5000);
+        }
+      }
+    };
+
+    const intervalId = setInterval(checkAutoSync, 30000); // Check every 30s
+    return () => clearInterval(intervalId);
+  }, [userSettings, documents, clients, isBackingUpToDrive]);
+
   // Manual Backup to Google Drive
-  const handleBackupToDrive = async () => {
+  const handleBackupToDrive = async (triggerType: 'manual' | 'scheduled' | 'auto_save' = 'manual') => {
     setIsBackingUpToDrive(true);
     try {
       const res = await googleDriveService.backupAllDataToDrive(
         documents,
         clients,
-        userSettings.driveFolderName
+        userSettings.driveFolderName,
+        triggerType
       );
+      setLastSyncResult({
+        success: res.success,
+        message: res.message,
+        timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      });
       if (res.success) {
         setDriveToast(res.message);
       } else {
@@ -420,12 +509,23 @@ export default function App() {
   };
 
   // Handler: Select client for Form Editor
-  const handleSelectClientForForm = (client: ClientProfile) => {
-    const existingDoc = documents.find((d) => d.clientId === client.id);
-    if (existingDoc) {
-      setCurrentDocument(existingDoc);
+  const handleSelectClientForForm = (client: ClientProfile, docType?: DocumentType) => {
+    if (docType) {
+      const existingMatchingDoc = documents.find(
+        (d) => d.clientId === client.id && d.type === docType
+      );
+      if (existingMatchingDoc) {
+        setCurrentDocument(existingMatchingDoc);
+      } else {
+        setCurrentDocument(createEmptyDocument(docType, client));
+      }
     } else {
-      setCurrentDocument(createEmptyDocument('intake', client));
+      const existingDoc = documents.find((d) => d.clientId === client.id);
+      if (existingDoc) {
+        setCurrentDocument(existingDoc);
+      } else {
+        setCurrentDocument(createEmptyDocument('intake', client));
+      }
     }
     setActiveTab('forms');
   };
@@ -479,6 +579,7 @@ export default function App() {
         docCount={documents.length}
         onNewConsultation={handleNewConsultation}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenScheduler={() => setIsSchedulerModalOpen(true)}
         user={googleUser}
         userSettings={userSettings}
         onSignInWithGoogle={handleSignInWithGoogle}
@@ -494,6 +595,19 @@ export default function App() {
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* TAB 0: MAIN PORTAL HUB (Initial clean overview) */}
+        {activeTab === 'portal' && (
+          <MainPortalHub
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            clients={clients}
+            documents={documents}
+            userSettings={userSettings}
+            onNewConsultation={handleNewConsultation}
+            onSelectClientForConsultation={handleSelectClientForConsultation}
+            onSelectClientForForm={handleSelectClientForForm}
+          />
+        )}
+
         {/* TAB 1: INTEGRATED SMART DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
@@ -566,6 +680,38 @@ export default function App() {
               {dashboardOrder.map((panelKey, idx) => {
                 const canMoveUp = idx > 0;
                 const canMoveDown = idx < dashboardOrder.length - 1;
+
+                if (panelKey === 'riskDiagnostic' && panels.riskDiagnostic?.isOpen) {
+                  return (
+                    <RiskDiagnosticCard
+                      key="riskDiagnostic"
+                      clients={clients}
+                      documents={documents}
+                      isOpen={panels.riskDiagnostic.isOpen}
+                      isMinimized={panels.riskDiagnostic.isMinimized}
+                      onToggleOpen={(open) => handleTogglePanelOpen('riskDiagnostic', open)}
+                      onToggleMinimize={(min) => handleTogglePanelMinimize('riskDiagnostic', min)}
+                      onSelectClientForAction={(client, docType) => {
+                        const targetDocType = docType || 'service_plan';
+                        const newDoc = createEmptyDocument(targetDocType, client);
+                        setCurrentDocument(newDoc);
+                        setActiveTab('form-editor');
+                      }}
+                      isDraggable={true}
+                      onMoveUp={() => handleMoveDashboardCard('riskDiagnostic', 'up')}
+                      onMoveDown={() => handleMoveDashboardCard('riskDiagnostic', 'down')}
+                      canMoveUp={canMoveUp}
+                      canMoveDown={canMoveDown}
+                      onDragStart={(e) => e.dataTransfer.setData('text/plain', 'riskDiagnostic')}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const source = e.dataTransfer.getData('text/plain');
+                        if (source) handleDragDropDashboardCard(source, 'riskDiagnostic');
+                      }}
+                    />
+                  );
+                }
 
                 if (panelKey === 'routes' && panels.routes?.isOpen) {
                   return (
@@ -759,6 +905,22 @@ export default function App() {
         onSignOutGoogle={handleSignOutGoogle}
         onBackupToDrive={handleBackupToDrive}
         isBackingUp={isBackingUpToDrive}
+        onOpenScheduler={() => {
+          setIsSettingsOpen(false);
+          setIsSchedulerModalOpen(true);
+        }}
+      />
+
+      {/* Cloud Auto Sync Scheduler & Push Notifications Modal */}
+      <AutoSyncSchedulerModal
+        isOpen={isSchedulerModalOpen}
+        onClose={() => setIsSchedulerModalOpen(false)}
+        userSettings={userSettings}
+        onUpdateSettings={handleSaveSettings}
+        user={googleUser}
+        onSignInWithGoogle={handleSignInWithGoogle}
+        onTriggerImmediateSync={() => handleBackupToDrive('manual')}
+        isSyncing={isBackingUpToDrive}
       />
 
       {/* Footer */}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
 import { ShieldCheck, FileCheck, CheckSquare, Lock } from 'lucide-react';
+import { CheckboxToggle } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -19,6 +20,10 @@ export const AgreementFormView: React.FC<FormProps> = ({
 }) => {
   const fields = doc.formSpecificFields || {};
 
+  const agreeService = fields.agreeService !== false;
+  const agreePrivacy = fields.agreePrivacy !== false;
+  const agreeThirdParty = fields.agreeThirdParty !== false;
+
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
       {/* Header */}
@@ -33,9 +38,17 @@ export const AgreementFormView: React.FC<FormProps> = ({
 
       {/* Part 1: 서비스 이용 안내 및 동의서 (Page 14) */}
       <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
-        <div className="flex items-center gap-2 border-b pb-2 font-bold text-sm text-teal-800 dark:text-teal-300">
-          <FileCheck className="w-4 h-4" />
-          <span>[서식 1] 재가노인지원서비스 이용 동의서</span>
+        <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center gap-2 font-bold text-sm text-teal-800 dark:text-teal-300">
+            <FileCheck className="w-4 h-4" />
+            <span>[서식 1] 재가노인지원서비스 이용 동의서</span>
+          </div>
+          <CheckboxToggle
+            label="서비스 이용 동의"
+            checked={agreeService}
+            onChange={(v) => onSpecificChange('agreeService', v)}
+            disabled={readOnly}
+          />
         </div>
 
         <div className="space-y-3 leading-relaxed text-stone-700 dark:text-stone-300">
@@ -56,45 +69,62 @@ export const AgreementFormView: React.FC<FormProps> = ({
 
       {/* Part 2: 개인정보 제공 및 활용 승낙서 (Page 15) */}
       <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
-        <div className="flex items-center gap-2 border-b pb-2 font-bold text-sm text-teal-800 dark:text-teal-300">
-          <Lock className="w-4 h-4" />
-          <span>[서식 2] 개인정보 수집·이용 및 제3자 제공 동의서</span>
+        <div className="flex items-center justify-between border-b pb-2">
+          <div className="flex items-center gap-2 font-bold text-sm text-teal-800 dark:text-teal-300">
+            <Lock className="w-4 h-4" />
+            <span>[서식 2] 개인정보 수집·이용 및 제3자 제공 동의서</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <CheckboxToggle
+              label="개인정보 수집 동의"
+              checked={agreePrivacy}
+              onChange={(v) => onSpecificChange('agreePrivacy', v)}
+              disabled={readOnly}
+            />
+            <CheckboxToggle
+              label="제3자 제공 동의"
+              checked={agreeThirdParty}
+              onChange={(v) => onSpecificChange('agreeThirdParty', v)}
+              disabled={readOnly}
+            />
+          </div>
         </div>
 
         <div className="space-y-3 leading-relaxed text-stone-700 dark:text-stone-300">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 p-2.5 bg-stone-50 dark:bg-[#251E1A] rounded border">
-            <div>• 수집항목: 성명, 주민등록번호, 주소, 연락처, 건강상태</div>
-            <div>• 수집목적: 재가노인지원서비스 수급 자격 심사 및 서비스 연계</div>
-            <div>• 보유기간: 서비스 종결 후 사회복지사업법 기준 5년 보관</div>
-          </div>
-          <div className="space-y-2 pt-1">
-            <label className="flex items-center gap-2 font-bold text-stone-900 dark:text-stone-100">
-              <input type="checkbox" checked={fields.hasAgreedToPrivacyCollection !== false} readOnly />
-              <span>■ [필수] 개인정보 수집 및 이용에 동의합니다.</span>
-            </label>
-            <label className="flex items-center gap-2 font-bold text-stone-900 dark:text-stone-100">
-              <input type="checkbox" checked={fields.hasAgreedToPrivacyThirdParty !== false} readOnly />
-              <span>■ [필수] 사회복지 유관기관 및 지자체 제3자 정보 제공에 동의합니다.</span>
-            </label>
-          </div>
+          <p>
+            <strong>• 수집·이용 목적:</strong> 재가노인지원서비스 제공, 복지 서비스 연계, 사회복지시설정보시스템(W4C) 등록 및 사례관리 이력 관리.
+          </p>
+          <p>
+            <strong>• 수집 항목:</strong> 성명, 주민등록번호, 주소, 연락처, 건강상태(만성질환), 경제상황(수급여부), 가족사항.
+          </p>
+          <p>
+            <strong>• 제3자 제공 기관:</strong> 관할 시·군·구청, 읍·면·동 주민센터, 국민건강보험공단, 연계 의료기관 및 후원단체.
+          </p>
         </div>
       </div>
 
-      {/* Signatures Form Table */}
-      <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-stone-50 dark:bg-[#251E1A] text-xs space-y-3">
-        <div className="text-center font-bold text-sm">
-          {fields.agreementDate || '2019년 07월 10일'}
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          <div className="space-y-1">
-            <p>• 신청인(이용자) 성명: <strong className="text-stone-900 dark:text-stone-100">{doc.clientName} (서명 / 인)</strong></p>
-            <p>• 주민등록번호: <strong>{client?.residentNumber || '451231-1******'}</strong></p>
-            <p>• 주 소: <strong>{client?.address || '대구광역시 달서구 상인동 비둘기아파트 205동 1515호'}</strong></p>
+      {/* Signature Box */}
+      <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-4 bg-white dark:bg-[#1E1916] space-y-3 text-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>동의일자:</span>
+            <input
+              type="text"
+              disabled={readOnly}
+              value={fields.agreementDate || '2019. 07. 10'}
+              onChange={(e) => onSpecificChange('agreementDate', e.target.value)}
+              className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs font-bold"
+            />
           </div>
-          <div className="space-y-1 md:text-right">
-            <p>• 제공기관: <strong>(사)굿실버복지회 굿실버노인복지센터</strong></p>
-            <p>• 시설장: <strong>장 성 태 (직인생략)</strong></p>
-            <p>• 담당 사회복지사: <strong>{doc.author || '이상호 (인)'}</strong></p>
+          <div className="flex items-center gap-2">
+            <span>동의자(신청인):</span>
+            <input
+              type="text"
+              disabled={readOnly}
+              value={fields.applicantSign || `${doc.clientName} (서명/인)`}
+              onChange={(e) => onSpecificChange('applicantSign', e.target.value)}
+              className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs font-bold"
+            />
           </div>
         </div>
       </div>

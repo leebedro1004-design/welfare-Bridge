@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
 import { Send, Reply, CheckCircle2, Building, UserCheck } from 'lucide-react';
+import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
@@ -20,6 +21,8 @@ export const ReferralFormView: React.FC<FormProps> = ({
   const fields = doc.formSpecificFields || {};
   const [tab, setTab] = useState<'request' | 'reply'>('request');
 
+  const referralReplyStatus = fields.referralReplyStatus || '의뢰 수락 (서비스 즉시 연계)';
+
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
       {/* Header */}
@@ -37,7 +40,7 @@ export const ReferralFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setTab('request')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             tab === 'request'
               ? 'bg-purple-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -48,7 +51,7 @@ export const ReferralFormView: React.FC<FormProps> = ({
         <button
           type="button"
           onClick={() => setTab('reply')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             tab === 'reply'
               ? 'bg-purple-700 text-white shadow-xs'
               : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-stone-900'
@@ -61,58 +64,55 @@ export const ReferralFormView: React.FC<FormProps> = ({
       {/* 1. 서비스 연계 및 의뢰서 (Page 23) */}
       {(tab === 'request' || window.matchMedia?.('print')?.matches) && (
         <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
-          <h4 className="font-bold text-sm text-purple-900 dark:text-purple-200 border-b pb-2 flex items-center gap-2">
-            <Send className="w-4 h-4 text-purple-600" />
-            <span>■ 서비스 연계 및 의뢰서 (타 기관 송부용)</span>
-          </h4>
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="font-bold text-sm text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
+              <Send className="w-4 h-4" />
+              <span>■ 재가노인지원서비스 연계 및 의뢰서</span>
+            </h4>
+            <div className="flex items-center gap-2">
+              <span className="text-stone-500">의뢰일자:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.referralDate || '2019. 07. 12'}
+                onChange={(e) => onSpecificChange('referralDate', e.target.value)}
+                className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs font-bold w-28"
+              />
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-stone-50 dark:bg-[#251E1A] rounded border">
-            <div>• 수신기관: <strong>{fields.referralTargetAgency || '성당노인복지센터 재가노인지원사업팀'}</strong></div>
-            <div>• 발신기관: <strong>{fields.referralSenderAgency || '(사)굿실버복지회 굿실버노인복지센터'}</strong></div>
-            <div>• 의뢰대상자: <strong>{doc.clientName} (75세 / 남)</strong></div>
-            <div>• 의뢰일자: <strong>2019년 07월 20일</strong></div>
+            <div>
+              <span className="font-semibold block mb-1">의뢰 기관 (발신):</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.referralSourceOrg || '굿실버재가노인지원센터 (담당: 이상호 사회복지사 / ☎ 053-123-4567)'}
+                onChange={(e) => onSpecificChange('referralSourceOrg', e.target.value)}
+                className="w-full p-1.5 border rounded bg-white dark:bg-[#1E1916]"
+              />
+            </div>
+            <div>
+              <span className="font-semibold block mb-1">수신 기관 (연계처):</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.referralTargetOrg || '달서구 자원봉사센터 및 지역사회보장협의체'}
+                onChange={(e) => onSpecificChange('referralTargetOrg', e.target.value)}
+                className="w-full p-1.5 border rounded bg-white dark:bg-[#1E1916]"
+              />
+            </div>
           </div>
 
           <div>
-            <label className="font-bold text-stone-800 dark:text-stone-200 block mb-1">
-              1. 의뢰 사유 및 대상자 특이사항
-            </label>
+            <label className="font-bold block mb-1">의뢰 사유 및 연계 요청 세부 내용:</label>
             <textarea
-              rows={3}
+              rows={4}
               disabled={readOnly}
-              value={fields.referralReason || '본 센터에서 재가노인지원서비스(밑반찬, 안부확인)를 제공받던 중, 거주지를 성당동으로 이전하게 되어 귀 기관으로 사례관리 및 계속적인 서비스 제공을 의뢰합니다.'}
+              value={fields.referralReason || '대상자는 국민기초생활수급 독거노인으로 관절염 악화로 인한 보행 불편과 식사 준비 곤란을 겪고 있습니다. 본 센터의 주 2회 밑반찬 배달과 병행하여 귀 기관의 주거환경개선 봉사단을 통해 화장실 안전손잡이 설치 및 방충망 보수 자원 연계를 정중히 의뢰합니다.'}
               onChange={(e) => onSpecificChange('referralReason', e.target.value)}
-              className="w-full p-2.5 border border-stone-300 dark:border-stone-700 rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
+              className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
             />
-          </div>
-
-          {/* Requested Services Grid */}
-          <div className="border border-stone-300 dark:border-stone-700 rounded overflow-hidden">
-            <div className="bg-stone-100 dark:bg-[#2A231F] px-3 py-1.5 font-bold text-xs">
-              2. 의뢰 요청 서비스 내역
-            </div>
-            <table className="w-full text-xs text-center border-collapse">
-              <thead>
-                <tr className="bg-stone-50 dark:bg-[#251E1A] border-b">
-                  <th className="p-2 border-r w-28">서비스 영역</th>
-                  <th className="p-2 text-left">요청 세부내용</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b">
-                  <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">일상생활지원</td>
-                  <td className="p-2 text-left">밑반찬 배달서비스 (주 2회 계속 지원 요망), 동절기 김장 지원</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">정서적지원</td>
-                  <td className="p-2 text-left">독거 어르신 정기 안부확인 및 말벗상담 (주 1회 이상)</td>
-                </tr>
-                <tr>
-                  <td className="p-2 bg-stone-50 dark:bg-[#251E1A] border-r font-semibold">지역자원연계</td>
-                  <td className="p-2 text-left">관절염 병원 진료 동행 및 기초생필품 결연 지원</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       )}
@@ -120,30 +120,46 @@ export const ReferralFormView: React.FC<FormProps> = ({
       {/* 2. 연계 및 의뢰 회신서 (Page 24) */}
       {(tab === 'reply' || window.matchMedia?.('print')?.matches) && (
         <div className="border border-stone-300 dark:border-stone-700 rounded-lg p-5 bg-white dark:bg-[#1E1916] space-y-4 text-xs">
-          <h4 className="font-bold text-sm text-purple-900 dark:text-purple-200 border-b pb-2 flex items-center gap-2">
-            <Reply className="w-4 h-4 text-purple-600" />
-            <span>■ 연계 및 의뢰 회신서 (접수 기관 회신용)</span>
-          </h4>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-stone-50 dark:bg-[#251E1A] rounded border">
-            <div>• 수신: <strong>굿실버노인복지센터 귀하</strong></div>
-            <div>• 발신: <strong>성당노인복지센터 관장</strong></div>
-            <div>• 회신일자: <strong>{fields.referralReplyDate || '2019년 07월 21일'}</strong></div>
-            <div>• 담당자: <strong>김성민 사회복지사 (☎ 053-628-8800)</strong></div>
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="font-bold text-sm text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
+              <Reply className="w-4 h-4" />
+              <span>■ 연계 및 의뢰 회신서</span>
+            </h4>
+            <div className="flex items-center gap-2">
+              <span className="text-stone-500">회신일자:</span>
+              <input
+                type="text"
+                disabled={readOnly}
+                value={fields.referralReplyDate || '2019. 07. 15'}
+                onChange={(e) => onSpecificChange('referralReplyDate', e.target.value)}
+                className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs font-bold w-28"
+              />
+            </div>
           </div>
 
-          <div className="p-4 bg-purple-50/60 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded space-y-3 leading-relaxed">
-            <div className="font-bold text-purple-950 dark:text-purple-200 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-purple-600" />
-              <span>의뢰에 대한 접수 및 지원 결정 결과</span>
-            </div>
-            <p>
-              귀 기관에서 의뢰하신 <strong>{doc.clientName} 어르신</strong>의 사례관리 의뢰서를 정식 접수하였으며, 내부 사례회의 심의 결과 <strong>재가노인지원서비스 신규 대상자로 최종 선정</strong>하였음을 회신합니다.
-            </p>
-            <div className="space-y-1 pt-1 font-semibold text-stone-800 dark:text-stone-200">
-              <p>• 개입 개시일: 2019년 07월 25일부터</p>
-              <p>• 제공 서비스: 주 2회 밑반찬 배달 및 주 1회 방문 안부확인 개시</p>
-            </div>
+          <div>
+            <label className="font-bold block mb-1">회신 결과 상태 구분:</label>
+            <RadioToggleGroup
+              options={[
+                '의뢰 수락 (서비스 즉시 연계)',
+                '조건부 수락 (대기 후 제공)',
+                '수용 불가 (자격 미달 또는 정원 초과)',
+              ]}
+              value={referralReplyStatus}
+              onChange={(v) => onSpecificChange('referralReplyStatus', v)}
+              disabled={readOnly}
+            />
+          </div>
+
+          <div>
+            <label className="font-bold block mb-1">회신 내용 및 지원 조치 계획:</label>
+            <textarea
+              rows={4}
+              disabled={readOnly}
+              value={fields.referralReplyDetail || '귀 기관에서 의뢰하신 독거어르신 주거안전 지원 요청을 정식 접수 및 승인하였습니다. 오는 7월 20일(토) 사랑의 봉사대 3명을 파견하여 화장실 안전손잡이 부착 및 방충망 교체 작업을 전액 무료로 진행할 예정입니다.'}
+              onChange={(e) => onSpecificChange('referralReplyDetail', e.target.value)}
+              className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
+            />
           </div>
         </div>
       )}

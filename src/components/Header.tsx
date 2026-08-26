@@ -18,11 +18,14 @@ import {
   Settings,
   Cloud,
   LogIn,
-  CheckCircle2
+  CheckCircle2,
+  Home,
+  Clock,
+  Maximize2
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
 
-export type AppTab = 'dashboard' | 'ai-studio' | 'forms' | 'routes' | 'insights' | 'clients' | 'archive' | 'supervision';
+export type AppTab = 'portal' | 'dashboard' | 'ai-studio' | 'forms' | 'routes' | 'insights' | 'clients' | 'archive' | 'supervision';
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -34,6 +37,8 @@ interface HeaderProps {
   user?: GoogleAuthUser | null;
   userSettings?: UserSettings;
   onSignInWithGoogle?: () => void;
+  onOpenScheduler?: () => void;
+  onToggleFocusMode?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -46,6 +51,8 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   userSettings,
   onSignInWithGoogle,
+  onOpenScheduler,
+  onToggleFocusMode,
 }) => {
   const [isDark, setIsDark] = useState<boolean>(() => {
     return document.documentElement.classList.contains('dark') ||
@@ -107,22 +114,42 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="font-bold text-emerald-200">{docCount}건</span>
             </div>
             {user ? (
-              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300">
-                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="font-medium truncate max-w-[130px]" title={user.email}>
-                  드라이브 연동 ({user.name})
+              <button
+                type="button"
+                onClick={onOpenScheduler}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/50 text-emerald-300 transition-colors cursor-pointer"
+                title="Google Drive 자동 동기화 스케줄러 열기"
+              >
+                <Clock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                <span className="font-semibold text-xs">
+                  {userSettings?.autoSyncTime ? `자동 백업 ${userSettings.autoSyncTime}` : '클라우드 스케줄러'}
                 </span>
-              </div>
+              </button>
             ) : (
-              <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-950/40 border border-amber-800/50 text-amber-300">
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span className="font-medium">사회복지 7대 표준양식 준수</span>
-              </div>
+              <button
+                type="button"
+                onClick={onOpenScheduler}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/50 text-amber-300 transition-colors cursor-pointer"
+                title="Google Drive 자동 동기화 스케줄러 설정"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span className="font-medium text-xs">자동 동기화 예약</span>
+              </button>
             )}
           </div>
 
           {/* Action CTAs */}
           <div className="flex items-center space-x-2">
+            {/* Auto-sync Scheduler Quick Button */}
+            <button
+              id="btn-open-scheduler-header"
+              type="button"
+              onClick={onOpenScheduler}
+              className="p-2 rounded-xl bg-[#2D2622] hover:bg-[#38302B] text-stone-300 hover:text-amber-300 border border-[#3E342F] transition-colors cursor-pointer"
+              title="Google Drive 자동 동기화 스케줄러 & 푸시 알림 설정"
+            >
+              <Clock className="w-4 h-4 text-amber-400" />
+            </button>
             {/* Google Login or Profile Avatar Button */}
             {user ? (
               <button
@@ -198,6 +225,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Navigation Tabs */}
         <nav className="flex space-x-1 border-t border-[#38302B] pt-1 overflow-x-auto scrollbar-none">
+          <button
+            id="tab-portal"
+            onClick={() => setActiveTab('portal')}
+            className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'portal'
+                ? 'border-amber-400 text-amber-300 bg-[#2E2723]'
+                : 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-[#2D2622]/50'
+            }`}
+          >
+            <Home className="w-4 h-4 text-amber-400" />
+            <span>메인 업무 포털</span>
+          </button>
+
           <button
             id="tab-dashboard"
             onClick={() => setActiveTab('dashboard')}
