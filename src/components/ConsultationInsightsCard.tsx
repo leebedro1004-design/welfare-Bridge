@@ -1183,6 +1183,95 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
                     </div>
                   </div>
                 </div>
+
+                {/* 📈 Recharts Transcript Emotion & Psychological Metric Trend Line Chart */}
+                <div className="mt-4 p-4 rounded-xl bg-stone-50/80 dark:bg-[#251E1A] border border-stone-200/80 dark:border-stone-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h5 className="text-xs font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-amber-600" />
+                        <span>녹취 실시간 구간별 어르신 심리 지표 및 감성 변화 트렌드 (Recharts Line Chart)</span>
+                      </h5>
+                      <span className="text-[10px] text-stone-500 dark:text-stone-400">
+                        상담 도입부부터 종료 시점까지 발화 음조 및 심리 지표의 실시간 변화 추이 분석
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] font-bold">
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="w-2.5 h-0.5 bg-emerald-500 rounded-full inline-block"></span> 심리적 안정도
+                      </span>
+                      <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
+                        <span className="w-2.5 h-0.5 bg-rose-500 border border-dashed rounded-full inline-block"></span> 우울/불안 지수
+                      </span>
+                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <span className="w-2.5 h-0.5 bg-amber-500 rounded-full inline-block"></span> 라포 형성도
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="h-48 w-full pt-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={[
+                          { stage: '0~3분 (도입)', stability: 42, depression: 78, rapport: 38 },
+                          { stage: '3~7분 (주호소)', stability: 36, depression: 85, rapport: 45 },
+                          { stage: '7~12분 (경청)', stability: 58, depression: 64, rapport: 68 },
+                          { stage: '12~18분 (공감)', stability: 72, depression: 48, rapport: 82 },
+                          { stage: '18~23분 (개입)', stability: 84, depression: 35, rapport: 92 },
+                          { stage: '23~30분 (마무리)', stability: 90, depression: 28, rapport: 96 },
+                        ]}
+                        margin={{ top: 10, right: 15, left: -20, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.4} />
+                        <XAxis dataKey="stage" tick={{ fontSize: 10 }} stroke="#9ca3af" />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#9ca3af" unit="점" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: '#1c1917',
+                            color: '#fff',
+                            borderRadius: '12px',
+                            fontSize: '11px',
+                            border: '1px solid #374151',
+                          }}
+                          formatter={(value: any, name: any) => [
+                            `${value}점`,
+                            name === 'stability'
+                              ? '심리적 안정도'
+                              : name === 'depression'
+                              ? '우울/불안 지수'
+                              : '라포 형성도',
+                          ]}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="stability"
+                          stroke="#10b981"
+                          strokeWidth={2.5}
+                          dot={{ r: 4, fill: '#10b981' }}
+                          activeDot={{ r: 6 }}
+                          name="stability"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="depression"
+                          stroke="#f43f5e"
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                          dot={{ r: 3, fill: '#f43f5e' }}
+                          name="depression"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="rapport"
+                          stroke="#f59e0b"
+                          strokeWidth={2}
+                          dot={{ r: 4, fill: '#f59e0b' }}
+                          name="rapport"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
             </div>
           )}

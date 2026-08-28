@@ -19,6 +19,8 @@ import { AutoSyncSchedulerModal } from './components/AutoSyncSchedulerModal';
 import { NewClientModal } from './components/NewClientModal';
 import { MajorFormsQuickModal } from './components/MajorFormsQuickModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
+import { SummaryReportView } from './components/SummaryReportView';
+import { LoginPage } from './components/LoginPage';
 import {
   BellRing,
   BrainCircuit,
@@ -37,7 +39,8 @@ import {
   Clock,
   ShieldAlert,
   Home,
-  Plus
+  Plus,
+  FileSpreadsheet
 } from 'lucide-react';
 import { ClientProfile, CaseDocument, UserSettings, GoogleAuthUser, ConsultationInsight, DocumentType } from './types';
 import { INITIAL_CLIENTS, INITIAL_DOCUMENTS } from './data/mockData';
@@ -91,10 +94,33 @@ export default function App() {
     return DEFAULT_USER_SETTINGS;
   });
 
-  // Google User Auth State
+  // Google User Auth & Drive Folder State
   const [googleUser, setGoogleUser] = useState<GoogleAuthUser | null>(() => {
     return googleDriveService.getCurrentUser();
   });
+  const [driveToken, setDriveToken] = useState<string | null>(() => {
+    return googleDriveService.getAccessToken();
+  });
+  const [folderId, setFolderId] = useState<string | null>(() => {
+    return sessionStorage.getItem('carebridge_gdrive_folder_id');
+  });
+
+  const handleLoginSuccess = (user: GoogleAuthUser, token: string, createdFolderId: string) => {
+    setGoogleUser(user);
+    setDriveToken(token);
+    setFolderId(createdFolderId);
+    sessionStorage.setItem('carebridge_gdrive_folder_id', createdFolderId);
+    setDriveToast(`[구글 인증 완료] '${user.name}' 계정 및 구글 드라이브 '케어브릿지_사례관리' 폴더가 연동되었습니다.`);
+    setTimeout(() => setDriveToast(null), 4000);
+  };
+
+  const handleLogout = () => {
+    googleDriveService.signOut();
+    setGoogleUser(null);
+    setDriveToken(null);
+    setFolderId(null);
+    sessionStorage.removeItem('carebridge_gdrive_folder_id');
+  };
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState<boolean>(false);
@@ -251,6 +277,8 @@ export default function App() {
           return { id: 'tab-archive', title: '문서 보관함', icon: <FolderCheck className="w-3.5 h-3.5 text-stone-400" /> };
         case 'supervision':
           return { id: 'tab-supervision', title: 'AI 수퍼비전', icon: <Bot className="w-3.5 h-3.5 text-purple-500" /> };
+        case 'summary-report':
+          return { id: 'tab-summary-report', title: '어르신 종합보고서', icon: <FileSpreadsheet className="w-3.5 h-3.5 text-purple-500" /> };
         default:
           return { id: 'tab-portal', title: '나의업무', icon: <Home className="w-3.5 h-3.5" /> };
       }
@@ -576,6 +604,11 @@ export default function App() {
     (c) => c.riskLevel.includes('고') || c.riskLevel.includes('위험')
   );
 
+  // 📌 구글 로그인 정보가 없으면 독립된 로그인 화면으로 전면 격리
+  if (!googleUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7F2] dark:bg-[#14100E] text-stone-900 dark:text-stone-100 flex flex-col font-sans selection:bg-amber-200 selection:text-stone-900 transition-colors">
       {/* 1. Global Top Navigation Header (희망이음 스타일 상단 대분류 헤더) */}
@@ -589,7 +622,8 @@ export default function App() {
         onOpenScheduler={() => setIsSchedulerModalOpen(true)}
         user={googleUser}
         userSettings={userSettings}
-        onSignInWithGoogle={handleSignInWithGoogle}
+        onSignInWithGoogle={() => handleLoginSuccess(googleUser || { id: 'user-1', name: '사회복지사', email: 'user@gmail.com', role: '복지사' }, driveToken || 'token', folderId || 'folder')}
+        onLogout={handleLogout}
         onOpenMajorFormsModal={() => setIsMajorFormsModalOpen(true)}
         onOpenNewClientModal={() => setIsNewClientModalOpen(true)}
         onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
@@ -861,6 +895,18 @@ export default function App() {
           {/* TAB 8: SUPERVISION */}
           {activeTab === 'supervision' && (
             <SupervisionAdvisor clients={clients} />
+          )}
+
+          {/* TAB 9: SUMMARY REPORT (어르신 종합 이력 보고서) */}
+          {activeTab === 'summary-report' && (
+            <SummaryReportView
+              clients={clients}
+              documents={documents}
+              insights={liveInsights}
+              selectedClient={selectedClientForAI || clients[0]}
+              onSelectClient={(c) => setSelectedClientForAI(c)}
+              onNavigateTab={(t) => navigateToTab(t)}
+            />
           )}
         </main>
       </div>

@@ -21,7 +21,8 @@ import {
   ChevronRight,
   LogOut,
   Building,
-  Headphones
+  Headphones,
+  FileSpreadsheet
 } from 'lucide-react';
 import { AppTab } from './Header';
 import { GoogleAuthUser, UserSettings } from '../types';
@@ -153,6 +154,22 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               <span className="text-[10px] font-bold text-stone-400 px-2 py-1 block uppercase">
                 업무 모듈 바로가기
               </span>
+
+              <button
+                type="button"
+                onClick={() => handleSelectTab('summary-report')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                  activeTab === 'summary-report' ? 'bg-purple-600 text-white' : 'text-stone-200 hover:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+                  <span>어르신 사례관리 종합 이력 보고서</span>
+                </div>
+                <span className="text-[10px] font-mono bg-purple-950 px-1.5 py-0.5 rounded text-purple-300">
+                  NEW
+                </span>
+              </button>
 
               <button
                 type="button"

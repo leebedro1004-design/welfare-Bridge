@@ -20,34 +20,125 @@
 }
 
 @media print {
-  body {
-    background-color: white !important;
-    color: black !important;
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 12mm 10mm;
   }
 
-  header, footer, nav, button, select, .no-print, input[type="file"], .dark-mode-toggle {
+  *,
+  *::before,
+  *::after {
+    background: transparent !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Malgun Gothic', '맑은 고딕', 'Pretendard', -apple-system, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide all non-printable UI components: buttons, mics, navs, headers, footers, sidebars, modals */
+  header,
+  footer,
+  nav,
+  aside,
+  button,
+  .no-print,
+  .dark-mode-toggle,
+  [role="dialog"] > div:first-child,
+  [id^="btn-"],
+  .fixed,
+  .sticky,
+  .mic-btn,
+  .voice-dictation-btn,
+  .toast,
+  .modal-overlay,
+  input[type="file"],
+  input[type="checkbox"]:not(:checked) {
     display: none !important;
   }
 
-  #printable-case-sheet {
+  /* Force display of main print containers with 100% width on white paper */
+  #printable-case-sheet,
+  #summary-report-print-target,
+  .official-print-document {
+    display: block !important;
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     max-width: 100% !important;
     width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
   }
 
-  /* Keep borders on tables and input containers for official print */
-  .border, .border-b, .border-t, .border-r, .border-l {
-    border-color: #333 !important;
-  }
-
-  textarea, input[type="text"] {
+  /* Clean up input, textarea, and select fields for official document print */
+  textarea,
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  select {
     border: none !important;
+    outline: none !important;
     background: transparent !important;
     resize: none !important;
     padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    color: #000000 !important;
+    font-family: inherit !important;
+    font-size: 11pt !important;
+    line-height: 1.5 !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: transparent !important;
+  }
+
+  /* Official table and border print styling with sharp black lines */
+  table,
+  th,
+  td,
+  .border,
+  .border-b,
+  .border-t,
+  .border-r,
+  .border-l,
+  .border-2 {
+    border-color: #000000 !important;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+  }
+
+  /* Prevent awkward page breaks */
+  .break-inside-avoid,
+  .official-form-card,
+  .approval-seal-box,
+  tr,
+  blockquote {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  h1, h2, h3, h4 {
+    color: #000000 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 }
 

@@ -18,6 +18,7 @@ import {
   Settings,
   Cloud,
   LogIn,
+  LogOut,
   CheckCircle2,
   Home,
   Clock,
@@ -29,11 +30,12 @@ import {
   UserPlus,
   Zap,
   Bookmark,
-  Menu
+  Menu,
+  FileSpreadsheet
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
 
-export type AppTab = 'portal' | 'dashboard' | 'ai-studio' | 'forms' | 'routes' | 'insights' | 'clients' | 'archive' | 'supervision';
+export type AppTab = 'portal' | 'dashboard' | 'ai-studio' | 'forms' | 'routes' | 'insights' | 'clients' | 'archive' | 'supervision' | 'summary-report';
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -45,6 +47,7 @@ interface HeaderProps {
   user?: GoogleAuthUser | null;
   userSettings?: UserSettings;
   onSignInWithGoogle?: () => void;
+  onLogout?: () => void;
   onOpenScheduler?: () => void;
   onToggleFocusMode?: () => void;
   onOpenMajorFormsModal?: () => void;
@@ -62,6 +65,7 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   userSettings,
   onSignInWithGoogle,
+  onLogout,
   onOpenScheduler,
   onToggleFocusMode,
   onOpenMajorFormsModal,
@@ -154,26 +158,39 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-stone-400 hidden xs:inline">({workerPosition})</span>
             </div>
 
-            {/* Auto-backup indicator */}
+            {/* Auto-backup indicator & Logout */}
             {user ? (
-              <button
-                type="button"
-                onClick={onOpenScheduler}
-                className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] hover:bg-emerald-900 transition-colors cursor-pointer"
-                title="Google Drive 자동 동기화 설정"
-              >
-                <Cloud className="w-3 h-3 text-emerald-400" />
-                <span>드라이브 연동 중</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenScheduler}
+                  className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] hover:bg-emerald-900 transition-colors cursor-pointer"
+                  title="Google Drive '케어브릿지_사례관리' 폴더 연동 중"
+                >
+                  <Cloud className="w-3 h-3 text-emerald-400" />
+                  <span>드라이브 연동 중</span>
+                </button>
+                {onLogout && (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/80 text-[10px] font-bold transition-all cursor-pointer shadow-xs"
+                    title="로그아웃 후 초기 화면으로 이동"
+                  >
+                    <LogOut className="w-3 h-3 text-rose-400" />
+                    <span>로그아웃</span>
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 type="button"
                 onClick={onSignInWithGoogle || onOpenSettings}
-                className="hidden lg:flex items-center gap-1 px-2 py-0.5 rounded bg-stone-800 text-stone-300 hover:text-amber-200 text-[10px] hover:bg-stone-700 transition-colors cursor-pointer"
-                title="Google 계정 로그인"
+                className="flex items-center gap-1 px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[10px] transition-colors cursor-pointer"
+                title="Google 계정 로그인 화면"
               >
-                <LogIn className="w-3 h-3 text-amber-400" />
-                <span>로그인</span>
+                <LogIn className="w-3 h-3" />
+                <span>Google 로그인</span>
               </button>
             )}
 
@@ -287,7 +304,25 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* 5. 위험도·인사이트 */}
+            {/* 5. 어르신 종합보고서 (Summary Report) */}
+            <button
+              id="tab-summary-report"
+              type="button"
+              onClick={() => setActiveTab('summary-report')}
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap border-b-2 ${
+                activeTab === 'summary-report'
+                  ? 'border-amber-400 text-amber-300 bg-[#352C27]'
+                  : 'border-transparent text-stone-300 hover:text-white hover:bg-[#312924]'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+              <span>어르신 종합보고서</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-950 text-purple-300 font-normal">
+                NEW
+              </span>
+            </button>
+
+            {/* 6. 위험도·인사이트 */}
             <button
               id="tab-insights"
               type="button"

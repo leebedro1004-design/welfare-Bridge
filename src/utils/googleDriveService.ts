@@ -19,7 +19,7 @@ export interface GoogleUserProfile {
 }
 
 const GOOGLE_DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
-const DEFAULT_FOLDER_NAME = '재가노인지원서비스_스마트사례관리_자료실';
+const DEFAULT_FOLDER_NAME = '케어브릿지_사례관리';
 const SYNC_HISTORY_KEY = 'carebridge_sync_history';
 
 class GoogleAuthAndDriveService {

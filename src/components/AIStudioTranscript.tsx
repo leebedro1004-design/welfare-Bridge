@@ -46,6 +46,7 @@ import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDo
 import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument } from '../utils/documentTemplates';
 import { PRESET_SCENARIOS } from '../data/mockData';
 import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuides';
+import { CounselingSentimentTrendChart } from './CounselingSentimentTrendChart';
 import confetti from 'canvas-confetti';
 
 export interface KeySegmentBookmark {
@@ -1685,6 +1686,9 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                     </p>
                   </div>
                 )}
+                {/* 📊 회기별 상담 정서 흐름 & 우울 추이 시각화 Chart */}
+                <CounselingSentimentTrendChart clientName={(clients.find(c => c.id === targetClientId) || selectedClient || clients[0])?.name || '어르신'} />
+
                 {/* 🎧 TTS Voice Player for Social Workers on the move */}
                 <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-teal-500/10 to-amber-500/10 dark:from-amber-950/40 dark:via-teal-950/40 dark:to-amber-950/40 border border-amber-300/80 dark:border-amber-700/70 shadow-xs space-y-2.5">
                   <div className="flex items-center justify-between">

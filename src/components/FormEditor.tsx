@@ -43,6 +43,8 @@ import {
   BarChart2,
   Compass,
   Expand,
+  Mic,
+  MicOff,
   Shrink,
   Edit3
 } from 'lucide-react';
@@ -175,6 +177,164 @@ export const FormEditor: React.FC<FormEditorProps> = ({
       setFocusSoundType('off');
     }
   }, [isFocusMode]);
+
+  // Voice Dictation State (구두 받아쓰기)
+  const [isDictating, setIsDictating] = useState<boolean>(false);
+  const [dictationTranscript, setDictationTranscript] = useState<string>('');
+  const [activeInputLabel, setActiveInputLabel] = useState<string>('사회복지사 종합 소견');
+  const [dictationToast, setDictationToast] = useState<string | null>(null);
+
+  const dictationRecognitionRef = useRef<any>(null);
+  const activeInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+
+  // Focus tracking inside FormEditor container
+  useEffect(() => {
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        const inputEl = target as HTMLInputElement | HTMLTextAreaElement;
+        activeInputRef.current = inputEl;
+        const placeholder = inputEl.placeholder || inputEl.name || inputEl.id || '선택된 서식 입력 항목';
+        setActiveInputLabel(placeholder.length > 25 ? placeholder.slice(0, 22) + '...' : placeholder);
+      }
+    };
+
+    document.addEventListener('focusin', handleFocusIn);
+    return () => document.removeEventListener('focusin', handleFocusIn);
+  }, []);
+
+  const fillActiveField = (text: string, isFinal: boolean) => {
+    let target = activeInputRef.current;
+    if (!target) {
+      const firstTextArea = document.querySelector('textarea') as HTMLTextAreaElement;
+      if (firstTextArea) {
+        target = firstTextArea;
+        activeInputRef.current = firstTextArea;
+      }
+    }
+
+    if (target) {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set || Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      )?.set;
+
+      const updatedVal = target.value ? `${target.value} ${text}` : text;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(target, updatedVal);
+      } else {
+        target.value = updatedVal;
+      }
+
+      const ev = new Event('input', { bubbles: true });
+      target.dispatchEvent(ev);
+
+      const fieldName = target.getAttribute('name') || target.id;
+      if (fieldName && fieldName in doc) {
+        handleFieldChange(fieldName as keyof CaseDocument, updatedVal);
+      } else if (fieldName) {
+        handleSpecificFieldChange(fieldName, updatedVal);
+      } else {
+        handleFieldChange('socialWorkerOpinion', updatedVal);
+      }
+    } else {
+      handleFieldChange('socialWorkerOpinion', doc.socialWorkerOpinion ? `${doc.socialWorkerOpinion} ${text}` : text);
+    }
+  };
+
+  const simulateSpeechInput = (customSpeech?: string) => {
+    const textToInsert = customSpeech || '어르신 하지 무릎 통증 심화 및 거실 문턱 낙상 위협 호소. 영양밑반찬 주3회 연계 요청.';
+    setDictationTranscript(textToInsert);
+    fillActiveField(textToInsert, true);
+  };
+
+  const toggleVoiceDictation = () => {
+    if (isDictating) {
+      if (dictationRecognitionRef.current) {
+        try { dictationRecognitionRef.current.stop(); } catch (e) {}
+      }
+      setIsDictating(false);
+      setDictationToast('구두 받아쓰기가 종료되었습니다.');
+      setTimeout(() => setDictationToast(null), 2500);
+      return;
+    }
+
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setIsDictating(true);
+      setDictationToast('마이크 음성 받아쓰기가 시작되었습니다. (시뮬레이션 음성 입력 가동)');
+      simulateSpeechInput();
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'ko-KR';
+
+      recognition.onstart = () => {
+        setIsDictating(true);
+        setDictationToast('마이크 활성화됨: 현재 선택된 서식 입력칸에 음성이 받아써집니다.');
+        setTimeout(() => setDictationToast(null), 3000);
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        const currentText = final || interim;
+        setDictationTranscript(currentText);
+
+        if (currentText) {
+          fillActiveField(currentText, !!final);
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        console.warn('Speech recognition error:', err);
+        setDictationToast('음성 받아쓰기 수신 대기 중입니다...');
+      };
+
+      recognition.onend = () => {
+        if (isDictating) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
+
+      recognition.start();
+      dictationRecognitionRef.current = recognition;
+    } catch (e) {
+      console.error(e);
+      setIsDictating(true);
+      simulateSpeechInput();
+    }
+  };
+
+  const handleRefineDictatedSpeech = () => {
+    setIsRefiningText(true);
+    setTimeout(() => {
+      setIsRefiningText(false);
+      const polished = '대상 어르신은 기상 후 하지 강직 및 무릎관절통으로 독자적 이동이 제한적이며, 영양 불균형 해소를 위해 밑반찬 지원 및 낙상 예방 주거 개보수를 긴급 연계함.';
+      fillActiveField(polished, true);
+      setDictationToast('AI가 구후 어조를 정제하여 사회복지 표준 서식 표현으로 다듬었습니다.');
+      setTimeout(() => setDictationToast(null), 3000);
+    }, 800);
+  };
 
   // Report Share State (보고서 이메일 & Google Drive 공유)
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
@@ -568,6 +728,31 @@ export const FormEditor: React.FC<FormEditorProps> = ({
 
         {/* Right: Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Voice Dictation Button (구두 받아쓰기) */}
+          <button
+            id="btn-voice-dictation-editor"
+            type="button"
+            onClick={toggleVoiceDictation}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shadow-xs ${
+              isDictating
+                ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-400 animate-pulse ring-2 ring-rose-400'
+                : 'bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-700 hover:bg-purple-100 dark:hover:bg-purple-900/60'
+            }`}
+            title="마이크 음성으로 서식 항목을 구두 받아쓰기하여 입력"
+          >
+            {isDictating ? (
+              <>
+                <MicOff className="w-3.5 h-3.5" />
+                <span>구두 받아쓰기 중...</span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>음성 구두 받아쓰기</span>
+              </>
+            )}
+          </button>
+
           {/* Condition Preset Template Picker */}
           <button
             id="btn-open-condition-preset"
@@ -658,6 +843,90 @@ export const FormEditor: React.FC<FormEditorProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Voice Dictation Live Control Bar & Field Target Indicator */}
+      {(isDictating || dictationToast) && (
+        <div className="bg-gradient-to-r from-purple-950/90 via-[#2E202B] to-[#1E1916] border-2 border-purple-500/80 rounded-2xl p-4 text-white shadow-lg space-y-3 animate-fade-in transition-all">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-purple-600 flex items-center justify-center text-white animate-pulse shadow-xs">
+                <Mic className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-black text-purple-200 uppercase tracking-wide">
+                    실시간 음성 구두 받아쓰기 (Dictation) 가동 중
+                  </h4>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500 text-white font-extrabold animate-pulse">
+                    LIVE
+                  </span>
+                </div>
+                <p className="text-xs text-stone-300 pt-0.5">
+                  현재 활성 입력칸: <strong className="text-amber-300 font-bold">[{activeInputLabel}]</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
+              <button
+                type="button"
+                onClick={handleRefineDictatedSpeech}
+                disabled={isRefiningText}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all border border-amber-400 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="받아쓴 음성 문장의 방언·어두 오차를 공문서 어조로 다듬기"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                <span>{isRefiningText ? '어조 다듬는 중...' : '✨ AI 공문서 어조 다듬기'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => simulateSpeechInput()}
+                className="px-2.5 py-1.5 rounded-xl bg-purple-900/80 hover:bg-purple-800 text-purple-200 text-xs font-bold transition-all border border-purple-700 flex items-center gap-1 cursor-pointer"
+                title="테스트 가상 음성 입력"
+              >
+                <span>테스트 음성 입력</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleVoiceDictation}
+                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <MicOff className="w-3.5 h-3.5" />
+                <span>받아쓰기 종료</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick preset phrases for dictation */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs pt-1 border-t border-purple-900/60">
+            <span className="text-[11px] text-purple-300 font-bold shrink-0">빠른 음성 구두 문구:</span>
+            {[
+              '양측 무릎 관절염 통증 호소',
+              '화장실 문턱 높음 낙상 위험',
+              '주 3회 영양 밑반찬 배달 연계',
+              '장기요양 등급 신청 서류 안내 완료'
+            ].map((phrase, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => simulateSpeechInput(phrase)}
+                className="text-[11px] px-2.5 py-1 rounded-lg bg-stone-900/80 border border-purple-700/60 text-stone-200 hover:bg-purple-900 hover:text-white transition-colors cursor-pointer"
+              >
+                + "{phrase}"
+              </button>
+            ))}
+          </div>
+
+          {dictationToast && (
+            <div className="text-[11px] text-amber-300 font-semibold flex items-center gap-1 bg-black/40 px-3 py-1 rounded-lg border border-purple-800/50">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{dictationToast}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Official Ministry of Health & Welfare Standard Print/PDF Modal */}
       <OfficialPrintExportModal

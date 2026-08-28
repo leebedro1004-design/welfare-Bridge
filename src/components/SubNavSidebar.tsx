@@ -34,7 +34,8 @@ import {
   Crosshair,
   Maximize2,
   Minimize2,
-  FolderOpen
+  FolderOpen,
+  FileSpreadsheet
 } from 'lucide-react';
 import { AppTab } from './Header';
 import { DocumentType, ClientProfile, UserSettings, CaseDocument } from '../types';
@@ -348,6 +349,15 @@ export const SubNavSidebar: React.FC<SubNavSidebarProps> = ({
                     <span>주요 법정 서식 빠른 런처</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('summary-report')}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold text-purple-300 hover:bg-[#2D2622] hover:text-white flex items-center gap-2 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-purple-400" />
+                  <span>어르신 종합보고서 (통합이력)</span>
+                </button>
               </div>
             )}
           </div>

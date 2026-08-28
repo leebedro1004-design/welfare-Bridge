@@ -172,9 +172,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <input
                       type="text"
                       value={form.institutionName}
-                      onChange={(e) => setForm({ ...form, institutionName: e.target.value })}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          institutionName: e.target.value,
+                          agencyName: e.target.value,
+                        })
+                      }
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#251E1A] text-xs font-semibold focus:ring-2 focus:ring-amber-500"
-                      placeholder="예: (사)굿실버복지회 굿실버재가노인지원서비스센터"
+                      placeholder="예: 도봉재가노인지원서비스센터"
                     />
                   </div>
                 </div>
@@ -201,9 +207,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <input
                       type="text"
                       value={form.workerName}
-                      onChange={(e) => setForm({ ...form, workerName: e.target.value })}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          workerName: e.target.value,
+                          socialWorkerName: e.target.value,
+                        })
+                      }
                       className="w-full pl-9 pr-3 py-2 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#251E1A] text-xs font-bold focus:ring-2 focus:ring-amber-500"
-                      placeholder="예: 이상호"
+                      placeholder="예: 이현정"
                     />
                   </div>
                 </div>
@@ -525,7 +537,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 {onBackupToDrive && (
-                  <div className="pt-2">
+                  <div className="pt-2 space-y-2">
                     <button
                       type="button"
                       disabled={isBackingUp}
@@ -543,6 +555,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <span>현재 전체 사례관리 데이터 구글 드라이브에 즉시 백업</span>
                         </>
                       )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const fakeRecordData = `[상담 기록]\n기관명: ${form.institutionName}\n담당자: ${form.workerName} (${form.workerPosition})\n대상자: 김순옥 어르신\n내용: 초기 면접 및 건강상태 AI 분석 결과 반영 완료.\n작성일시: ${new Date().toLocaleString('ko-KR')}`;
+                        const fileName = `테스트_사례관리_기록_${Date.now()}.txt`;
+                        const res = await googleDriveService.uploadFileToDrive(fileName, fakeRecordData, 'text/plain', form.driveFolderName);
+                        if (res.success) {
+                          alert(`[드라이브 업로드 성공]\n파일명: ${fileName}\n파일 ID: ${res.fileId || '확인됨'}\n구글 드라이브 폴더 [${form.driveFolderName}]에 저장되었습니다.`);
+                        } else {
+                          alert(`구글 드라이브 업로드 실패: ${res.error || '로그인을 확인해주세요.'}`);
+                        }
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-bold hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors cursor-pointer text-xs"
+                    >
+                      <FolderDown className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>테스트 녹취/상담 서식 드라이브 개별 업로드 테스트</span>
                     </button>
                   </div>
                 )}
