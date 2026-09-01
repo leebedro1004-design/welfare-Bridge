@@ -47,7 +47,11 @@ import {
   ShieldCheck,
   FastForward,
   Rewind,
-  MessageSquareQuote
+  MessageSquareQuote,
+  Save,
+  Database,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -65,6 +69,7 @@ import {
   Line
 } from 'recharts';
 import { ClientProfile, CaseDocument, ConsultationInsight } from '../types';
+import { DOCUMENT_TYPE_LABELS, createEmptyDocument } from '../utils/documentTemplates';
 
 interface ConsultationInsightsCardProps {
   clients: ClientProfile[];
@@ -73,6 +78,8 @@ interface ConsultationInsightsCardProps {
   insights?: ConsultationInsight[];
   onSelectClient?: (clientId: string) => void;
   onOpenFormForClient?: (client: ClientProfile) => void;
+  onSaveDocument?: (doc: CaseDocument) => void;
+  onUpdateDocument?: (doc: CaseDocument) => void;
   isOpen?: boolean;
   isMinimized?: boolean;
   onToggleOpen?: (open: boolean) => void;
@@ -95,6 +102,8 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
   insights = [],
   onSelectClient,
   onOpenFormForClient,
+  onSaveDocument,
+  onUpdateDocument,
   isOpen = true,
   isMinimized: controlledMinimized,
   onToggleOpen,
@@ -138,6 +147,18 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
     }
   });
   const [isFavoritesOnly, setIsFavoritesOnly] = useState<boolean>(false);
+
+  // Core Consultation Summary & CaseDocument Auto-Save State
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState<boolean>(false);
+  const [isSavingDoc, setIsSavingDoc] = useState<boolean>(false);
+  const [selectedTargetDocId, setSelectedTargetDocId] = useState<string>('auto_latest');
+  const [lastSavedDocInfo, setLastSavedDocInfo] = useState<{
+    docId: string;
+    docTitle: string;
+    clientName: string;
+    savedAt: string;
+    docType: string;
+  } | null>(null);
 
   // Transcript Analyzer & Audio Player State
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string>('sample-1');
@@ -390,6 +411,167 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
     setTimeout(() => setCopiedReportToast(null), 3500);
   };
 
+  // Target Client Resolver for Consultation Summary Auto-Save
+  const getEffectiveClient = (): ClientProfile => {
+    if (selectedClientId !== 'all') {
+      const found = clients.find((c) => c.id === selectedClientId);
+      if (found) return found;
+    }
+    // Match by transcript content or ID
+    if (currentTranscript.title.includes('김순자') || currentTranscript.id === 'sample-1') {
+      const kim = clients.find((c) => c.name.includes('김순자'));
+      if (kim) return kim;
+    }
+    if (currentTranscript.title.includes('박정남') || currentTranscript.id === 'sample-2') {
+      const park = clients.find((c) => c.name.includes('박정남'));
+      if (park) return park;
+    }
+    if (currentTranscript.title.includes('이영수') || currentTranscript.id === 'sample-3') {
+      const lee = clients.find((c) => c.name.includes('이영수'));
+      if (lee) return lee;
+    }
+    return clients[0] || {
+      id: 'client-default',
+      name: '김순자',
+      birthDate: '1942-03-15',
+      age: 83,
+      gender: '여',
+      phone: '010-3456-7890',
+      address: '서울특별시 도봉구 도봉로 123길 45',
+      livingType: '독거노인',
+      welfareType: '기초생활수급자(생계/의료)',
+      longTermCareStatus: '등급외 A',
+      chronicDiseases: ['고혈압', '퇴행성관절염'],
+      riskLevel: '고위험',
+      caseWorker: '이현정',
+      registrationDate: '2024-01-10',
+      status: '집중관리',
+      emergencyContact: { name: '김민수', relation: '장남', phone: '010-9876-5432' }
+    };
+  };
+
+  // Auto-Save '상담 핵심 요약' into CaseDocument '상담 내용' fields
+  const handleAutoSaveToCaseDocument = (customTargetDocId?: string) => {
+    const targetClient = getEffectiveClient();
+    setIsSavingDoc(true);
+
+    setTimeout(() => {
+      // 1. Find or create target CaseDocument
+      const clientDocs = documents.filter(
+        (d) => d.clientId === targetClient.id || d.clientName === targetClient.name || d.clientName?.includes(targetClient.name)
+      );
+
+      let targetDoc: CaseDocument;
+      if (customTargetDocId && customTargetDocId !== 'new_doc' && customTargetDocId !== 'auto_latest') {
+        targetDoc = documents.find((d) => d.id === customTargetDocId) || clientDocs[0] || createEmptyDocument('monitoring', targetClient);
+      } else if (customTargetDocId === 'new_doc') {
+        targetDoc = createEmptyDocument('monitoring', targetClient);
+      } else {
+        // Default to latest document or create new monitoring record
+        targetDoc = clientDocs[0] || createEmptyDocument('monitoring', targetClient);
+      }
+
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+      const formattedTime = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      const timestampStr = `${formattedDate} ${formattedTime}`;
+
+      // 2. Format comprehensive '상담 내용' fields
+      const updatedSocialWorkerOpinion = `[상담 핵심 요약 및 임상 종합 소견 (AI 녹취 분석 연동 - ${timestampStr})]\n` +
+        `■ 주요 호소 및 욕구: ${analysisResultNote}\n` +
+        `■ AI 핵심 분류 태그: ${generatedTags.join(', ')}\n` +
+        `■ 어르신 심리·정서 상태: ${currentTranscript.primaryEmotion}\n` +
+        `■ 중점 사정 키워드: ${currentTranscript.keywords.map((k) => `${k.word}(${k.category}: ${k.weight})`).join(', ')}\n` +
+        `■ 개입 및 사후 관리 계획: 대상 어르신의 주요 호소 문제를 기반으로 맞춤형 복지서비스를 즉시 연계하고, 주 1회 이상 정기 안부 모니터링을 지속함.`;
+
+      const updatedRawNotes = `[상담 녹취 요약 기록 (${currentTranscript.date})]\n` +
+        `• 상담 제목: ${currentTranscript.title}\n` +
+        `• 음성 파일: ${currentTranscript.audioFile}\n` +
+        `• AI 핵심 분석 요약: ${analysisResultNote}\n` +
+        `• 녹취 대화 발췌 전문:\n${currentTranscript.text}`;
+
+      const updatedExecutiveSummary = [
+        `[상담 핵심 요약] ${analysisResultNote}`,
+        `[AI 자동 분류 태그] ${generatedTags.join(', ')}`,
+        `[어르신 정서 상태] ${currentTranscript.primaryEmotion} - 사회복지사 실무 개입 및 지원 계획 반영 완료`,
+      ];
+
+      const updatedPrimaryNeeds = Array.from(new Set([
+        ...(targetDoc.primaryNeeds || []),
+        ...generatedTags.map((t) => t.replace(/^#/, ''))
+      ]));
+
+      const updatedFormSpecificFields = {
+        ...(targetDoc.formSpecificFields || {}),
+        monitoringDetailedNotes: targetDoc.formSpecificFields?.monitoringDetailedNotes
+          ? `${targetDoc.formSpecificFields.monitoringDetailedNotes}\n\n[AI 상담 핵심 요약 (${timestampStr})]\n${analysisResultNote}`
+          : `[AI 상담 핵심 요약 (${timestampStr})]\n${analysisResultNote}`,
+        monitoringChange: analysisResultNote,
+        conferenceDiscussion: targetDoc.formSpecificFields?.conferenceDiscussion
+          ? `${targetDoc.formSpecificFields.conferenceDiscussion}\n\n[상담 요약 (${timestampStr})]: ${analysisResultNote}`
+          : `[상담 요약 (${timestampStr})]: ${analysisResultNote}`,
+        serviceReason: targetDoc.formSpecificFields?.serviceReason || analysisResultNote,
+        clientCoreProblem: targetDoc.formSpecificFields?.clientCoreProblem || analysisResultNote,
+      };
+
+      const updatedDoc: CaseDocument = {
+        ...targetDoc,
+        clientId: targetClient.id,
+        clientName: targetClient.name,
+        socialWorkerOpinion: updatedSocialWorkerOpinion,
+        rawNotes: updatedRawNotes,
+        executiveSummary: updatedExecutiveSummary,
+        primaryNeeds: updatedPrimaryNeeds,
+        sourceTranscript: currentTranscript.text,
+        updatedAt: now.toISOString(),
+        formSpecificFields: updatedFormSpecificFields,
+        status: targetDoc.status || '임시저장',
+      };
+
+      // Persist via callbacks
+      if (onSaveDocument) {
+        onSaveDocument(updatedDoc);
+      }
+      if (onUpdateDocument && onUpdateDocument !== onSaveDocument) {
+        onUpdateDocument(updatedDoc);
+      }
+
+      // Local storage backup
+      try {
+        const savedDocs = localStorage.getItem('senior_care_documents');
+        if (savedDocs) {
+          const parsed = JSON.parse(savedDocs);
+          const idx = parsed.findIndex((d: CaseDocument) => d.id === updatedDoc.id);
+          let nextDocs: CaseDocument[];
+          if (idx >= 0) {
+            nextDocs = [...parsed];
+            nextDocs[idx] = updatedDoc;
+          } else {
+            nextDocs = [updatedDoc, ...parsed];
+          }
+          localStorage.setItem('senior_care_documents', JSON.stringify(nextDocs));
+        }
+      } catch (e) {
+        console.error('Failed to sync to local storage', e);
+      }
+
+      setIsSavingDoc(false);
+      setIsUpdateModalOpen(false);
+
+      const docTypeLabel = (DOCUMENT_TYPE_LABELS as any)[updatedDoc.documentType || 'intake']?.short || '상담 서식';
+      setLastSavedDocInfo({
+        docId: updatedDoc.id,
+        docTitle: updatedDoc.title || `${targetClient.name} 어르신 ${docTypeLabel}`,
+        clientName: targetClient.name,
+        savedAt: timestampStr,
+        docType: docTypeLabel,
+      });
+
+      setCopiedReportToast(`[상담 이력 저장 완료] '${targetClient.name}' 어르신의 ${docTypeLabel} '상담 내용' 필드에 핵심 요약이 성공적으로 업데이트되어 저장되었습니다.`);
+      setTimeout(() => setCopiedReportToast(null), 4500);
+    }, 500);
+  };
+
   // Topic inference helper
   const getDocumentTopics = (doc: CaseDocument): { label: string; type: 'health' | 'psychology' | 'welfare' | 'safety'; color: string }[] => {
     const text = ((doc.title || '') + ' ' + (doc.socialWorkerOpinion || '') + ' ' + (doc.rawNotes || '') + ' ' + (doc.documentType || '') + ' ' + (doc.executiveSummary?.join(' ') || '')).toLowerCase();
@@ -522,6 +704,17 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>AI 심리 리포트</span>
+              </button>
+
+              {/* ⚡ '상담 핵심 요약 → 상담 이력(CaseDocument) 저장' Button */}
+              <button
+                type="button"
+                onClick={() => setIsUpdateModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white shadow-xs transition-colors cursor-pointer"
+                title="상담 핵심 요약을 선택된 어르신의 상담 이력(CaseDocument) '상담 내용' 필드에 자동 반영 및 저장합니다"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                <span>상담 내용 이력 저장</span>
               </button>
             </div>
           )}
@@ -1077,6 +1270,72 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
                             <Copy className="w-3.5 h-3.5 text-stone-500" />
                             <span>요약본 복사</span>
                           </button>
+                        </div>
+
+                        {/* ⚡ 상담 이력(CaseDocument) '상담 내용' 필드 자동 업데이트 & 저장 Action Area */}
+                        <div className="pt-2.5 border-t border-stone-100 dark:border-stone-800 space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAutoSaveToCaseDocument()}
+                            disabled={isSavingDoc}
+                            className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer hover:shadow-sm"
+                            title="현재 선택된 어르신의 상담 이력(CaseDocument) 내 '상담 내용' 및 소견 필드에 핵심 요약본을 자동으로 업데이트하고 저장합니다"
+                          >
+                            {isSavingDoc ? (
+                              <>
+                                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>상담 이력에 자동 저장 중...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-4 h-4 text-emerald-200" />
+                                <span>선택 어르신 상담 이력 '상담 내용'에 자동 저장</span>
+                              </>
+                            )}
+                          </button>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsUpdateModalOpen(true)}
+                              className="w-full py-1.5 px-2 rounded-lg border border-teal-200 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 font-bold text-[11px] flex items-center justify-center gap-1 hover:bg-teal-100 transition-colors cursor-pointer"
+                              title="저장할 서식을 직접 선택하거나 업데이트 전 상담 내용을 미리 검토합니다"
+                            >
+                              <Database className="w-3 h-3 text-teal-600" />
+                              <span>서식 선택 및 상세 설정</span>
+                            </button>
+                          </div>
+
+                          {/* Success Saved Notification Box with Quick Open Button */}
+                          {lastSavedDocInfo && (
+                            <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] space-y-1.5 animate-fade-in">
+                              <div className="flex items-center justify-between text-emerald-800 dark:text-emerald-300 font-bold">
+                                <span className="flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                  <span>상담 이력 저장 완료</span>
+                                </span>
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">
+                                  {lastSavedDocInfo.savedAt}
+                                </span>
+                              </div>
+                              <p className="text-stone-600 dark:text-stone-300 line-clamp-1">
+                                <strong>[{lastSavedDocInfo.clientName} 어르신]</strong> {lastSavedDocInfo.docTitle}
+                              </p>
+                              {onOpenFormForClient && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const targetClient = getEffectiveClient();
+                                    onOpenFormForClient(targetClient);
+                                  }}
+                                  className="w-full py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>방금 업데이트된 서식 바로 열기</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1647,19 +1906,29 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
 
           {/* Bottom AI Synthesis & Actionable Advice */}
           <div className="p-4 rounded-xl bg-gradient-to-r from-amber-50/80 via-stone-50 to-emerald-50/60 dark:from-amber-950/40 dark:via-[#251E1A] dark:to-emerald-950/40 border border-amber-200/80 dark:border-amber-800/60 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-amber-950 dark:text-amber-300">
                 <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 <span>AI 상담 인사이트 종합 분석 & 사회복지사 실무 권고사항</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsEmailReportModalOpen(true)}
-                className="text-xs font-bold text-teal-800 dark:text-teal-300 hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <Mail className="w-3.5 h-3.5" />
-                <span>표준 보고서로 메일 전송</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAutoSaveToCaseDocument()}
+                  className="text-xs font-bold text-emerald-800 dark:text-emerald-300 hover:underline flex items-center gap-1 cursor-pointer bg-emerald-100/60 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-200/80 dark:border-emerald-800/80"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>상담 이력에 자동 저장</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEmailReportModalOpen(true)}
+                  className="text-xs font-bold text-teal-800 dark:text-teal-300 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>표준 보고서로 메일 전송</span>
+                </button>
+              </div>
             </div>
             <div className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed space-y-1.5">
               <p>
@@ -2104,6 +2373,183 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
           </div>
         </div>
       )}
+
+      {/* 💾 모달: 상담 핵심 요약 & 상담 이력(CaseDocument) '상담 내용' 자동 업데이트 저장 모달 */}
+      {isUpdateModalOpen && (() => {
+        const targetClient = getEffectiveClient();
+        const clientDocs = documents.filter(
+          (d) => d.clientId === targetClient.id || d.clientName === targetClient.name || d.clientName?.includes(targetClient.name)
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800 w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in my-8">
+              <div className="p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-[#251F1C] dark:to-[#1E2522]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                    <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                      <span>상담 핵심 요약 → 상담 이력(CaseDocument) 저장</span>
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold dark:bg-emerald-900/80 dark:text-emerald-200">
+                        자동 동기화
+                      </span>
+                    </h3>
+                    <p className="text-xs text-stone-500 dark:text-stone-400">
+                      분석된 상담 요약, 임상 소견, 태그 및 녹취 기록을 선택된 어르신의 공식 서식 '상담 내용' 필드에 반영합니다.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateModalOpen(false)}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200 dark:hover:bg-stone-800 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5 text-xs text-stone-700 dark:text-stone-300 max-h-[75vh] overflow-y-auto">
+                {/* 1. 대상 어르신 선택 */}
+                <div className="p-4 rounded-xl bg-stone-50 dark:bg-[#251E1A] border border-stone-200 dark:border-stone-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-emerald-600" />
+                      반영 대상 어르신 선택
+                    </span>
+                    <span className="text-[11px] text-stone-500">
+                      현재 매칭: <strong className="text-emerald-600 dark:text-emerald-400">{targetClient.name}</strong> ({targetClient.age}세, {targetClient.riskLevel})
+                    </span>
+                  </div>
+
+                  <select
+                    value={selectedClientId}
+                    onChange={(e) => {
+                      setSelectedClientId(e.target.value);
+                      if (onSelectClient) onSelectClient(e.target.value);
+                    }}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916] text-stone-900 dark:text-stone-100 font-bold"
+                  >
+                    <option value="all">자동 매칭 (녹취록 대상: {targetClient.name} 어르신)</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} 어르신 ({c.age}세, {c.livingType}, {c.riskLevel})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. 업데이트할 상담 이력 서식 선택 */}
+                <div className="p-4 rounded-xl bg-stone-50 dark:bg-[#251E1A] border border-stone-200 dark:border-stone-800 space-y-2">
+                  <span className="font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-teal-600" />
+                    업데이트할 상담 서식(CaseDocument) 선택
+                  </span>
+                  
+                  <select
+                    value={selectedTargetDocId}
+                    onChange={(e) => setSelectedTargetDocId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916] text-stone-900 dark:text-stone-100 font-medium"
+                  >
+                    <option value="auto_latest">
+                      ⚡ 최근 상담 서식에 자동 업데이트 ({clientDocs[0]?.title || `${targetClient.name} 어르신 최신 상담일지`})
+                    </option>
+                    {clientDocs.map((d) => {
+                      const label = (DOCUMENT_TYPE_LABELS as any)[d.documentType || 'intake']?.short || d.documentType;
+                      return (
+                        <option key={d.id} value={d.id}>
+                          [{label}] {d.title || `${d.clientName} 어르신 서식`} ({d.createdAt?.slice(0, 10) || '일자미상'})
+                        </option>
+                      );
+                    })}
+                    <option value="new_doc">
+                      + 새로운 정기 모니터링/상담일지 서식 신규 생성 후 저장
+                    </option>
+                  </select>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                    * 기존 서식을 선택하면 '사회복지사 소견(socialWorkerOpinion)', '원시 상담기록(rawNotes)', '3줄 요약(executiveSummary)', '주요 욕구' 필드가 업데이트됩니다.
+                  </p>
+                </div>
+
+                {/* 3. 업데이트될 '상담 내용' 미리보기 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-600" />
+                      업데이트될 '상담 내용' 필드 내용 미리보기
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">
+                      실제 서식 반영 규격
+                    </span>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-stone-100/90 dark:bg-[#28211D] border border-stone-200 dark:border-stone-800 space-y-3 font-mono text-[11px] leading-relaxed">
+                    <div className="border-b border-stone-200 dark:border-stone-700 pb-2">
+                      <span className="font-bold text-amber-800 dark:text-amber-300 block">
+                        [1] 사회복지사 종합 소견 (socialWorkerOpinion):
+                      </span>
+                      <p className="text-stone-800 dark:text-stone-200 mt-1 whitespace-pre-line">
+                        {`[상담 핵심 요약 및 임상 종합 소견 (AI 녹취 분석 연동)]\n■ 주요 호소 및 욕구: ${analysisResultNote}\n■ AI 핵심 분류 태그: ${generatedTags.join(', ')}\n■ 심리·정서 상태: ${currentTranscript.primaryEmotion}\n■ 중점 사정 키워드: ${currentTranscript.keywords.map((k) => `${k.word}(${k.category})`).join(', ')}`}
+                      </p>
+                    </div>
+
+                    <div className="border-b border-stone-200 dark:border-stone-700 pb-2">
+                      <span className="font-bold text-teal-800 dark:text-teal-300 block">
+                        [2] 3줄 핵심 요약 브리핑 (executiveSummary):
+                      </span>
+                      <ul className="list-disc list-inside text-stone-800 dark:text-stone-200 mt-1 space-y-0.5">
+                        <li>[상담 요약] {analysisResultNote}</li>
+                        <li>[핵심 태그] {generatedTags.join(', ')}</li>
+                        <li>[정서 상태] {currentTranscript.primaryEmotion} - 맞춤 복지서비스 개입 및 모니터링 적용</li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <span className="font-bold text-stone-700 dark:text-stone-300 block">
+                        [3] 원시 상담 기록 및 녹취 발췌 (rawNotes):
+                      </span>
+                      <p className="text-stone-600 dark:text-stone-400 mt-1 line-clamp-2">
+                        {currentTranscript.text}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-stone-200 dark:border-stone-800 flex items-center justify-between bg-stone-50 dark:bg-[#251F1C]">
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-100 cursor-pointer"
+                >
+                  취소
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAutoSaveToCaseDocument(selectedTargetDocId)}
+                  disabled={isSavingDoc}
+                  className="px-5 py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md transition-all cursor-pointer flex items-center gap-2"
+                >
+                  {isSavingDoc ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>서식에 저장 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>{targetClient.name} 어르신 상담 이력에 즉시 저장</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Notification Toast */}
       {copiedReportToast && (

@@ -34,6 +34,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
+import { CareBridgeLogo } from './CareBridgeLogo';
 
 export type AppTab = 'portal' | 'dashboard' | 'ai-studio' | 'forms' | 'routes' | 'insights' | 'clients' | 'archive' | 'supervision' | 'summary-report';
 
@@ -127,14 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
               <Menu className="w-4 h-4 text-amber-400" />
             </button>
 
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="w-6 h-6 rounded-lg bg-amber-600 flex items-center justify-center shadow-xs border border-amber-400/40 shrink-0">
-                <HeartHandshake className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
-              </div>
-              <span className="font-extrabold tracking-tight text-white text-xs sm:text-sm flex items-center gap-1">
-                케어브릿지 <span className="text-amber-400 font-semibold text-[10px] sm:text-[11px] hidden xs:inline">희망이음</span>
-              </span>
-            </div>
+            <CareBridgeLogo size="sm" showSubtitle={false} showBadge={true} badgeText="희망이음" />
             <span className="hidden md:inline-block w-px h-3 bg-stone-700" />
             <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-amber-200 font-medium bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/40">
               <Building className="w-3 h-3 text-amber-400" />

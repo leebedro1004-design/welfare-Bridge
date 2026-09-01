@@ -249,6 +249,10 @@ export default function App() {
     localStorage.setItem('senior_care_documents', JSON.stringify(documents));
   }, [documents]);
 
+  useEffect(() => {
+    localStorage.setItem('senior_care_live_insights', JSON.stringify(liveInsights));
+  }, [liveInsights]);
+
   // Tab Manager Helper: Ensures clicked tab is in openTabs
   const navigateToTab = (tab: AppTab, subTitle?: string, docType?: DocumentType) => {
     setActiveTab(tab);
@@ -814,6 +818,9 @@ export default function App() {
                     isMinimized={panels.insights.isMinimized}
                     onToggleOpen={(open) => handleTogglePanelOpen('insights', open)}
                     onToggleMinimize={(min) => handleTogglePanelMinimize('insights', min)}
+                    onOpenFormForClient={handleSelectClientForForm}
+                    onSaveDocument={handleSaveDocument}
+                    onUpdateDocument={handleSaveDocument}
                   />
                 )}
               </div>
@@ -869,6 +876,9 @@ export default function App() {
                 documents={documents}
                 customInsights={liveInsights}
                 isOpen={true}
+                onOpenFormForClient={handleSelectClientForForm}
+                onSaveDocument={handleSaveDocument}
+                onUpdateDocument={handleSaveDocument}
               />
             </div>
           )}
