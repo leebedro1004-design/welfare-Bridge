@@ -46,7 +46,7 @@ import {
   FileCheck
 } from 'lucide-react';
 import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight } from '../types';
-import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument } from '../utils/documentTemplates';
+import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument, createEmptyDocument } from '../utils/documentTemplates';
 import {
   validateAudioFile,
   isAudioFile,
@@ -57,6 +57,8 @@ import {
 import { PRESET_SCENARIOS } from '../data/mockData';
 import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuides';
 import { CounselingSentimentTrendChart } from './CounselingSentimentTrendChart';
+import { AIFormWizardStepView } from './AIFormWizardStepView';
+import { AIRealtimeSummaryCard } from './AIRealtimeSummaryCard';
 import confetti from 'canvas-confetti';
 
 export interface KeySegmentBookmark {
@@ -81,7 +83,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   onPushInsightToDashboard,
 }) => {
   // Navigation / Mode state
-  const [activeMainTab, setActiveMainTab] = useState<'transcript' | 'guide'>('transcript');
+  const [activeMainTab, setActiveMainTab] = useState<'transcript' | 'wizard' | 'guide'>('transcript');
 
   // Input states
   const [transcriptText, setTranscriptText] = useState<string>('');
@@ -111,9 +113,37 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   // Auto-send 3-line summary state
   const [autoSendToInsights, setAutoSendToInsights] = useState<boolean>(true);
   const [sentInsightToast, setSentInsightToast] = useState<string | null>(null);
+  const [showRealtimeSummary, setShowRealtimeSummary] = useState<boolean>(false);
+
+  // Apply mapped draft from realtime summary directly to form editor
+  const handleApplyRealtimeSummaryDraftToForm = (targetType: DocumentType, mappedDraftData: Record<string, any>) => {
+    const client = clients.find((c) => c.id === targetClientId) || selectedClient || clients[0];
+    const baseDoc = createEmptyDocument(targetType, client);
+    const mergedDoc: CaseDocument = {
+      ...baseDoc,
+      ...mappedDraftData,
+      clientId: client.id,
+      clientName: client.name,
+      documentType: targetType,
+      type: targetType,
+      formSpecificFields: {
+        ...(baseDoc.formSpecificFields || {}),
+        ...(mappedDraftData.formSpecificFields || {}),
+      },
+    };
+
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {}
+
+    onGenerateDocument(mergedDoc);
+  };
 
   // Recording & Microphone states
-
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
@@ -121,42 +151,24 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [micStatusMessage, setMicStatusMessage] = useState<string | null>(null);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
 
   const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef<boolean>(false);
+  const isPausedRef = useRef<boolean>(false);
   const timerRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // Analysis states
-  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [analysisProgress, setAnalysisProgress] = useState<number>(0);
-  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResponse | null>(null);
-  const [isEditingAnalysis, setIsEditingAnalysis] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState<boolean>(false);
-
-  // Text-To-Speech (TTS) State for Social Workers on the Move
-  const [isTtsSpeaking, setIsTtsSpeaking] = useState<boolean>(false);
-  const [isTtsPaused, setIsTtsPaused] = useState<boolean>(false);
-  const [ttsRate, setTtsRate] = useState<number>(1.0);
-  const [ttsVolume, setTtsVolume] = useState<number>(1.0);
-  const [autoPlayTtsOnComplete, setAutoPlayTtsOnComplete] = useState<boolean>(false);
-  const [ttsActiveSection, setTtsActiveSection] = useState<string>('');
-  const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  // Focus Area options
-  const FOCUS_OPTIONS = [
-    '식사/영양결식',
-    '낙상/주거안전',
-    '만성질환/복약',
-    '우울/고립감',
-    '인지기능/기억력',
-    '경제/수급상황',
-    '응급안전안심',
-    '장기요양진입',
-  ];
+  // Sync state to ref to avoid stale closures in event listeners
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+    isPausedRef.current = isPaused;
+  }, [isRecording, isPaused]);
 
   // Initialize Web Speech API if supported
   useEffect(() => {
@@ -186,18 +198,23 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       };
 
       recog.onerror = (err: any) => {
-        console.warn('Speech recognition notification:', err);
+        console.warn('Speech recognition event notification:', err?.error || err);
         if (err.error === 'not-allowed') {
-          setMicStatusMessage('마이크 접근 권한이 차단되었습니다. 브라우저 설정에서 권한을 허용해 주세요.');
+          setMicStatusMessage('마이크 접근 권한이 차단되었습니다. 브라우저 설정에서 마이크를 허용해 주세요.');
           stopRecordingInternal();
+        } else if (err.error === 'no-speech') {
+          // Normal pause in speaking, do not stop recording
         }
       };
 
       recog.onend = () => {
-        if (isRecording && !isPaused) {
+        // Use live ref values to seamlessly restart continuous recognition without dropping out
+        if (isRecordingRef.current && !isPausedRef.current) {
           try {
             recog.start();
-          } catch (e) {}
+          } catch (e) {
+            // Already started or restarting
+          }
         }
       };
 
@@ -210,6 +227,34 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       stopRecordingInternal();
     };
   }, []);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<number>(0);
+  const [analysisResult, setAnalysisResult] = useState<AIAnalysisResponse | null>(null);
+  const [isEditingAnalysis, setIsEditingAnalysis] = useState<boolean>(false);
+  const [isWizardMode, setIsWizardMode] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
+
+  // Text-To-Speech (TTS) State for Social Workers on the Move
+  const [isTtsSpeaking, setIsTtsSpeaking] = useState<boolean>(false);
+  const [isTtsPaused, setIsTtsPaused] = useState<boolean>(false);
+  const [ttsRate, setTtsRate] = useState<number>(1.0);
+  const [ttsVolume, setTtsVolume] = useState<number>(1.0);
+  const [autoPlayTtsOnComplete, setAutoPlayTtsOnComplete] = useState<boolean>(false);
+  const [ttsActiveSection, setTtsActiveSection] = useState<string>('');
+  const ttsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Focus Area options
+  const FOCUS_OPTIONS = [
+    '식사/영양결식',
+    '낙상/주거안전',
+    '만성질환/복약',
+    '우울/고립감',
+    '인지기능/기억력',
+    '경제/수급상황',
+    '응급안전안심',
+    '장기요양진입',
+  ];
 
   // Update target client when prop changes
   useEffect(() => {
@@ -218,12 +263,13 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     }
   }, [selectedClient]);
 
-  // Audio level visualizer loop
+  // Audio level visualizer and MediaRecorder capture loop
   const startAudioVisualizer = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
+      // 1. Audio Visualizer Setup
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       audioContextRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -247,6 +293,42 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         animFrameRef.current = requestAnimationFrame(updateMeter);
       };
       updateMeter();
+
+      // 2. MediaRecorder for high-fidelity audio stream capture
+      recordedChunksRef.current = [];
+      try {
+        let mimeType = 'audio/webm;codecs=opus';
+        if (typeof MediaRecorder !== 'undefined') {
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'audio/webm';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+              mimeType = 'audio/mp4';
+              if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = '';
+              }
+            }
+          }
+          const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              recordedChunksRef.current.push(e.data);
+            }
+          };
+          recorder.onstop = () => {
+            if (recordedChunksRef.current.length > 0) {
+              const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+              setRecordedAudioBlob(blob);
+              const audioUrl = URL.createObjectURL(blob);
+              setUploadedAudioUrl(audioUrl);
+              setUploadedAudioFileName(`현장녹음_${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}.webm`);
+            }
+          };
+          recorder.start(500);
+          mediaRecorderRef.current = recorder;
+        }
+      } catch (recorderErr) {
+        console.warn('MediaRecorder init notice:', recorderErr);
+      }
     } catch (err) {
       console.warn('Microphone stream access notice:', err);
     }
@@ -255,6 +337,8 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const stopRecordingInternal = () => {
     setIsRecording(false);
     setIsPaused(false);
+    isRecordingRef.current = false;
+    isPausedRef.current = false;
     setInterimTranscript('');
     setAudioLevel(0);
     clearInterval(timerRef.current);
@@ -262,6 +346,12 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
+      } catch (e) {}
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
       } catch (e) {}
     }
 
@@ -279,6 +369,9 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
+
+    // Automatically activate real-time summary & auto-mapping step when recording completes
+    setShowRealtimeSummary(true);
   };
 
   // Format Timer helper
@@ -645,6 +738,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         onPushInsightToDashboard(sttLiveInsight);
       }
 
+      setShowRealtimeSummary(true);
       setAudioProgress(100);
       setUploadSuccessBanner(
         `🎙️ '${file.name}' STT 변환 완료! 대화록 정제 및 실시간 인사이트(Live Insights)가 대시보드에 즉시 자동 연동되었습니다.`
@@ -681,6 +775,17 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setIsTranscribingAudio(false);
       setTranscribingStatus('');
     }
+  };
+
+  // Convert recorded live audio blob directly to Gemini STT
+  const handleTranscribeRecordedAudio = async () => {
+    if (!recordedAudioBlob) {
+      setErrorMessage('녹음된 현장 음성 데이터가 없습니다.');
+      return;
+    }
+    const fileName = `현장상담녹음_${new Date().toISOString().slice(0, 10)}_${new Date().getHours()}시${new Date().getMinutes()}분.webm`;
+    const audioFile = new File([recordedAudioBlob], fileName, { type: recordedAudioBlob.type || 'audio/webm' });
+    await processAudioFile(audioFile);
   };
 
   // Cancel in-flight audio transcription
@@ -870,6 +975,8 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       }
 
       setAnalysisResult(data.result);
+      setIsWizardMode(true);
+      setActiveMainTab('wizard');
 
       // Auto-transmit 3-line summary to dashboard if enabled
       if (autoSendToInsights && onPushInsightToDashboard) {
@@ -986,6 +1093,8 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setAnalysisProgress(100);
       setIsAnalyzing(false);
       setAnalysisResult(emergencyResult);
+      setIsWizardMode(true);
+      setActiveMainTab('wizard');
 
       if (autoSendToInsights && onPushInsightToDashboard) {
         transmitInsightToDashboard(emergencyResult);
@@ -1264,32 +1373,64 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         </div>
       </div>
 
-      {/* Mode Selector Tabs: [🎙️ AI 음성/녹취록 입력] vs [🧭 실시간 상담 가이드 모드 (질문 체크리스트)] */}
-      <div className="flex items-center gap-2 p-1.5 bg-stone-100 dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800">
+      {/* Mode Selector Tabs: [🎙️ 1. AI 음성/녹취록 입력] vs [✨ 2. 단계별 AI 서식 완성 마법사] vs [🧭 3. 실시간 상담 가이드 모드] */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-1.5 bg-stone-100 dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800">
         <button
           type="button"
           onClick={() => setActiveMainTab('transcript')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeMainTab === 'transcript'
               ? 'bg-white dark:bg-[#2C2420] text-amber-900 dark:text-amber-300 shadow-sm border border-stone-200/80 dark:border-stone-700'
               : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
           }`}
         >
           <FileAudio className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-          <span>🎙️ AI 음성 녹음 & 녹취록 기반 표준 서식 작성</span>
+          <span>🎙️ 1. 음성/녹취록 입력</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!analysisResult) {
+              if (transcriptText.trim()) {
+                runAIAnalysis();
+              } else {
+                setErrorMessage('서식 완성 마법사를 시작하려면 먼저 녹취록 텍스트를 입력하거나 음성 파일을 첨부해 주세요.');
+                setActiveMainTab('transcript');
+              }
+            } else {
+              setActiveMainTab('wizard');
+              setIsWizardMode(true);
+            }
+          }}
+          className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer relative ${
+            activeMainTab === 'wizard'
+              ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-400'
+              : analysisResult
+              ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 animate-pulse'
+              : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-300" />
+          <span>✨ 2. 단계별 서식 완성 마법사</span>
+          {analysisResult && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white text-amber-900 font-bold">
+              분석완료
+            </span>
+          )}
         </button>
 
         <button
           type="button"
           onClick={() => setActiveMainTab('guide')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+          className={`flex-1 py-2.5 px-3.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeMainTab === 'guide'
               ? 'bg-white dark:bg-[#2C2420] text-teal-900 dark:text-teal-300 shadow-sm border border-stone-200/80 dark:border-stone-700'
               : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
           }`}
         >
           <Compass className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-          <span>🧭 실시간 상담 가이드 모드 (단계별 질문 체크리스트)</span>
+          <span>🧭 3. 실시간 상담 가이드</span>
           <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-bold border border-teal-300">
             5단계
           </span>
@@ -1314,8 +1455,61 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         </div>
       )}
 
-      {/* When Guide Mode is Active */}
-      {activeMainTab === 'guide' ? (
+      {/* Mode Views Switching */}
+      {activeMainTab === 'wizard' ? (
+        analysisResult ? (
+          <AIFormWizardStepView
+            analysisResult={analysisResult}
+            client={clients.find((c) => c.id === targetClientId) || selectedClient || null}
+            documentType={documentType}
+            workerNotes={workerNotes}
+            transcriptText={transcriptText}
+            focusAreas={focusAreas}
+            onUpdateAnalysisResult={(updated) => setAnalysisResult(updated)}
+            onFinishAndSave={(finalDoc) => {
+              onGenerateDocument(finalDoc);
+            }}
+            onPushInsight={(insight) => {
+              if (onPushInsightToDashboard) {
+                onPushInsightToDashboard(insight);
+              }
+            }}
+            onCancel={() => setActiveMainTab('transcript')}
+          />
+        ) : (
+          <div className="bg-white dark:bg-[#1E1916] rounded-2xl p-8 border border-stone-200 dark:border-stone-800 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center mx-auto">
+              <Sparkles className="w-8 h-8 animate-bounce" />
+            </div>
+            <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
+              AI 분석 데이터가 준비되지 않았습니다
+            </h3>
+            <p className="text-xs text-stone-600 dark:text-stone-400 max-w-md mx-auto leading-relaxed">
+              [음성/녹취록 입력] 탭에서 상담 녹음 파일을 첨부하거나 대화 내용을 입력한 후, 
+              <strong> [AI 자동 분석]</strong>을 실행하시면 단계별 수정 및 다듬기 마법사가 즉시 시작됩니다.
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setActiveMainTab('transcript')}
+                className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white font-bold text-xs shadow-sm cursor-pointer"
+              >
+                녹취록 입력 화면으로 이동하기
+              </button>
+              {transcriptText.trim() && (
+                <button
+                  type="button"
+                  onClick={runAIAnalysis}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>지금 바로 AI 분석 시작</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      ) : activeMainTab === 'guide' ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left: 5-Stage Step Navigator & Stage Details (7 Cols) */}
           <div className="lg:col-span-7 space-y-5">
@@ -1996,6 +2190,21 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   controls
                   className="w-full h-8 rounded-lg focus:outline-none"
                 />
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                    💡 재생 바에서 음성을 확인하거나 Gemini AI로 고정밀 녹취록 변환을 수행할 수 있습니다.
+                  </span>
+                  {recordedAudioBlob && !isTranscribingAudio && (
+                    <button
+                      type="button"
+                      onClick={handleTranscribeRecordedAudio}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Gemini 고정밀 STT 변환</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -2272,8 +2481,19 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           </div>
         </div>
 
-        {/* Right Column: AI Analysis Output & 1-Click Form Preview (5 Cols) */}
+        {/* Right Column: AI Analysis Output & Realtime Summary Auto-Mapping (5 Cols) */}
         <div className="lg:col-span-5 space-y-5">
+          {/* ⚡ Real-Time Consultation Summary & Auto-Mapping Card (Triggered upon recording end or when transcript exists) */}
+          {(showRealtimeSummary || transcriptText.trim().length > 15) && (
+            <AIRealtimeSummaryCard
+              transcriptText={transcriptText}
+              clientName={(clients.find((c) => c.id === targetClientId) || selectedClient || clients[0])?.name || '상담 어르신'}
+              clientId={targetClientId || selectedClient?.id || clients[0]?.id || 'client-1'}
+              defaultDocType={documentType}
+              onApplyMappedDraftToForm={handleApplyRealtimeSummaryDraftToForm}
+            />
+          )}
+
           {analysisResult ? (
             <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200/90 dark:border-stone-800 shadow-xs overflow-hidden sticky top-24 transition-colors">
               {/* Header banner */}
@@ -2738,17 +2958,39 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   </button>
                 </div>
 
-                {/* Apply Button */}
-                <div className="pt-2">
+                {/* Analysis Result Immediate Linkage & Wizard Actions */}
+                <div className="pt-2 space-y-2">
+                  <button
+                    id="btn-immediate-form-link"
+                    type="button"
+                    onClick={handleApplyToForm}
+                    className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ring-2 ring-emerald-400/50 active:scale-[0.99]"
+                    title="추출된 상담 분석 내용을 10대 표준 서식에 자동 매핑하여 서식 편집기 초안으로 즉시 이동합니다."
+                  >
+                    <ArrowRight className="w-4 h-4 text-emerald-100" />
+                    <span>⚡ 분석 결과 즉시 연동 ({DOCUMENT_TYPE_LABELS[documentType].short} 초안 바로가기)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveMainTab('wizard');
+                      setIsWizardMode(true);
+                    }}
+                    className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ring-1 ring-amber-400/40 active:scale-[0.99]"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-200 animate-spin" />
+                    <span>✨ AI 6단계 서식 완성 마법사 (차례대로 문장 수정·다듬기)</span>
+                  </button>
+
                   <button
                     id="btn-apply-to-form-editor"
                     type="button"
                     onClick={handleApplyToForm}
-                    className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-amber-700 hover:bg-amber-600 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs text-stone-700 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-200 dark:border-stone-700 flex items-center justify-center gap-2 transition-all cursor-pointer"
                   >
-                    <FileText className="w-4 h-4" />
-                    <span>서식 편집기로 이동하여 인쇄/PDF/저장하기</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <FileText className="w-3.5 h-3.5 text-stone-500" />
+                    <span>서식 편집기로 이동 (수동 직접 편집/PDF 출력)</span>
                   </button>
                 </div>
               </div>

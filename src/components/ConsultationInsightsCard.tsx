@@ -51,7 +51,14 @@ import {
   Save,
   Database,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Pin,
+  PinOff,
+  Trash2,
+  Headphones,
+  Search,
+  SlidersHorizontal,
+  Plus
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -70,6 +77,55 @@ import {
 } from 'recharts';
 import { ClientProfile, CaseDocument, ConsultationInsight } from '../types';
 import { DOCUMENT_TYPE_LABELS, createEmptyDocument } from '../utils/documentTemplates';
+
+// Default initial high-quality Consultation Insight Cards
+const DEFAULT_INITIAL_INSIGHTS: ConsultationInsight[] = [
+  {
+    id: 'insight-seed-1',
+    clientId: 'client-1',
+    clientName: '김순자',
+    timestamp: '2025-05-18 14:30',
+    riskLevel: '고위험',
+    threeLineSummary: [
+      '1. [신체·건강] 우천 시 양측 무릎 관절염 통증 극심하여 기립 및 보행 불안정, 단독 취사 불가로 결식 빈도 급증',
+      '2. [정서·욕구] 독거로 인한 세상 고립감 및 우울감 호소, 정기적인 방문 안부 확인 및 정서적 말벗 지원 희망',
+      '3. [조치·계획] 주 3회 밑반찬 배달 긴급 연계, 보건소 방문 물리치료 의뢰 및 화장실 안전손잡이 긴급 설치 추진'
+    ],
+    keyIssues: ['무릎관절염 통증', '식사 결식', '독거 우울감'],
+    recommendedService: '밑반찬 배달 및 영양도시락 연계',
+    isUrgent: true
+  },
+  {
+    id: 'insight-seed-2',
+    clientId: 'client-2',
+    clientName: '박정남',
+    timestamp: '2025-05-17 11:20',
+    riskLevel: '고위험',
+    threeLineSummary: [
+      '1. [신체·건강] 기립성 저혈압으로 인한 아침 기상 시 어지럼증 및 욕실 낙상 직전 아차사고 경험',
+      '2. [정서·욕구] 낙상 재발에 대한 공포로 실내 이동 위축, 화장실 미끄럼 방지 및 안전바 설치 요청',
+      '3. [조치·계획] 욕실 미끄럼방지 매트 및 L자형 안전손잡이 긴급 시공, 혈압약 복약 순응도 모니터링'
+    ],
+    keyIssues: ['기립성 어지럼', '욕실 낙상위험', '주거 안전손잡이'],
+    recommendedService: '욕실 안전바 및 미끄럼방지 패드 시공',
+    isUrgent: true
+  },
+  {
+    id: 'insight-seed-3',
+    clientId: 'client-3',
+    clientName: '이영수',
+    timestamp: '2025-05-15 15:45',
+    riskLevel: '일반',
+    threeLineSummary: [
+      '1. [신체·건강] 혈압·혈당 수치 안정적으로 유지 중이며 경로당 실버체조 참여로 식사 및 보행 활력 회복',
+      '2. [정서·욕구] 복지 연계 후 교우관계 형성되어 고립감 해소, 스마트폰 기초 활용 교육 프로그램 참여 희망',
+      '3. [조치·계획] 경로당 정기 참여 지속 독려, 복지관 스마트폰 교실 연계 및 월 1회 정기 모니터링 배정'
+    ],
+    keyIssues: ['경로당 실버체조', '교우관계 형성', '정서안정 호전'],
+    recommendedService: '경로당 여가 프로그램 및 디지털 배움터 연계',
+    isUrgent: false
+  }
+];
 
 interface ConsultationInsightsCardProps {
   clients: ClientProfile[];
@@ -133,10 +189,26 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
   const [isPsychReportModalOpen, setIsPsychReportModalOpen] = useState<boolean>(false);
   const [isEmailReportModalOpen, setIsEmailReportModalOpen] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
-  const [activeAnalysisTab, setActiveAnalysisTab] = useState<'insights' | 'transcript_analyzer' | 'doc_timeline'>('insights');
+  const [activeAnalysisTab, setActiveAnalysisTab] = useState<'cards' | 'insights' | 'transcript_analyzer' | 'doc_timeline'>('cards');
   const [timelineViewMode, setTimelineViewMode] = useState<'list' | 'calendar'>('list');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>('2025-05-18');
   
+  // Live AI Consultation Insight Cards State
+  const [searchInsightQuery, setSearchInsightQuery] = useState<string>('');
+  const [insightRiskFilter, setInsightRiskFilter] = useState<'all' | 'high_risk' | 'urgent' | 'ai_live'>('all');
+  const [pinnedInsightIds, setPinnedInsightIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('carebridge_pinned_insights');
+      return saved ? JSON.parse(saved) : ['insight-seed-1'];
+    } catch {
+      return ['insight-seed-1'];
+    }
+  });
+  const [deletedInsightIds, setDeletedInsightIds] = useState<string[]>([]);
+  const [playingTtsInsightId, setPlayingTtsInsightId] = useState<string | null>(null);
+  const [copiedInsightId, setCopiedInsightId] = useState<string | null>(null);
+  const [savedInsightDocId, setSavedInsightDocId] = useState<string | null>(null);
+
   // Favorites / Starred System
   const [starredDocIds, setStarredDocIds] = useState<string[]>(() => {
     try {
@@ -621,6 +693,145 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
     };
   });
 
+  // Combine custom live insights from AI Studio with initial default insight cards
+  const rawInsights = [...customInsights, ...insights];
+  const allInitialPlusCustom = [
+    ...rawInsights,
+    ...DEFAULT_INITIAL_INSIGHTS.filter(
+      (seed) => !rawInsights.some((ci) => ci.id === seed.id || (ci.clientId === seed.clientId && ci.timestamp === seed.timestamp))
+    )
+  ];
+
+  const activeInsightCards = allInitialPlusCustom
+    .filter((ins) => !deletedInsightIds.includes(ins.id))
+    .filter((ins) => {
+      if (selectedClientId !== 'all' && ins.clientId !== selectedClientId) return false;
+      if (insightRiskFilter === 'high_risk' && ins.riskLevel !== '고위험') return false;
+      if (insightRiskFilter === 'urgent' && !ins.isUrgent) return false;
+      if (insightRiskFilter === 'ai_live' && !customInsights.some((c) => c.id === ins.id)) return false;
+      if (searchInsightQuery.trim()) {
+        const q = searchInsightQuery.toLowerCase();
+        const client = clients.find((c) => c.id === ins.clientId);
+        const nameMatch = (ins.clientName || client?.name || '').toLowerCase().includes(q);
+        const summaryMatch = (ins.threeLineSummary || []).some((s) => s.toLowerCase().includes(q));
+        const issuesMatch = (ins.keyIssues || []).some((k) => k.toLowerCase().includes(q));
+        const serviceMatch = (ins.recommendedService || '').toLowerCase().includes(q);
+        return nameMatch || summaryMatch || issuesMatch || serviceMatch;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const aPinned = pinnedInsightIds.includes(a.id) ? 1 : 0;
+      const bPinned = pinnedInsightIds.includes(b.id) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      return 0; // retain newest/custom first
+    });
+
+  const handleTogglePinInsight = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPinnedInsightIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [id, ...prev];
+      try {
+        localStorage.setItem('carebridge_pinned_insights', JSON.stringify(next));
+      } catch (err) {}
+      return next;
+    });
+    setCopiedReportToast(pinnedInsightIds.includes(id) ? '인사이트 카드 상단 고정이 해제되었습니다.' : '📌 중요 인사이트 카드가 상단에 고정되었습니다.');
+    setTimeout(() => setCopiedReportToast(null), 2500);
+  };
+
+  const handleDeleteInsightCard = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDeletedInsightIds((prev) => [...prev, id]);
+    setCopiedReportToast('선택한 상담 인사이트 카드가 목록에서 삭제되었습니다.');
+    setTimeout(() => setCopiedReportToast(null), 2500);
+  };
+
+  const handleCopyInsightCardSummary = (ins: ConsultationInsight, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const formatted = `[AI 상담 3줄 핵심 요약 - ${ins.clientName} 어르신 (${ins.timestamp})]\n` +
+      `위험도: ${ins.riskLevel} | 주요 욕구: ${(ins.keyIssues || []).join(', ')}\n` +
+      `추천 연계 서비스: ${ins.recommendedService}\n\n` +
+      `${ins.threeLineSummary.join('\n')}`;
+    navigator.clipboard.writeText(formatted);
+    setCopiedInsightId(ins.id);
+    setCopiedReportToast(`'${ins.clientName}' 어르신의 3줄 상담 요약이 클립보드에 복사되었습니다.`);
+    setTimeout(() => {
+      setCopiedInsightId(null);
+      setCopiedReportToast(null);
+    }, 3000);
+  };
+
+  const handlePlayInsightTts = (ins: ConsultationInsight, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (playingTtsInsightId === ins.id) {
+      window.speechSynthesis.cancel();
+      setPlayingTtsInsightId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const speechText = `${ins.clientName} 어르신 상담 요약입니다. 위험도 ${ins.riskLevel}. ${ins.threeLineSummary.join('. ')}. 추천 연계 서비스는 ${ins.recommendedService} 입니다.`;
+    const utterance = new SpeechSynthesisUtterance(speechText);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0;
+
+    const voices = window.speechSynthesis.getVoices();
+    const koVoice = voices.find((v) => v.lang.includes('ko') || v.lang.includes('KR'));
+    if (koVoice) utterance.voice = koVoice;
+
+    utterance.onstart = () => setPlayingTtsInsightId(ins.id);
+    utterance.onend = () => setPlayingTtsInsightId(null);
+    utterance.onerror = () => setPlayingTtsInsightId(null);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleAutoSaveInsightToCaseDoc = (ins: ConsultationInsight, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const targetClient = clients.find((c) => c.id === ins.clientId) || {
+      id: ins.clientId,
+      name: ins.clientName,
+      riskLevel: ins.riskLevel
+    } as ClientProfile;
+
+    const clientDocs = documents.filter((d) => d.clientId === ins.clientId || d.clientName === ins.clientName);
+    const targetDoc = clientDocs[0] || createEmptyDocument('monitoring', targetClient);
+
+    const now = new Date();
+    const timestampStr = `${now.toLocaleDateString('ko-KR')} ${now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`;
+
+    const updatedDoc: CaseDocument = {
+      ...targetDoc,
+      updatedAt: now.toISOString().slice(0, 10),
+      socialWorkerOpinion: (targetDoc.socialWorkerOpinion ? targetDoc.socialWorkerOpinion + '\n\n' : '') +
+        `[실시간 AI 상담 3줄 요약 (${timestampStr})]\n${ins.threeLineSummary.join('\n')}\n(추천 연계: ${ins.recommendedService})`,
+      executiveSummary: ins.threeLineSummary,
+      primaryNeeds: Array.from(new Set([...(targetDoc.primaryNeeds || []), ...(ins.keyIssues || [])])),
+      riskLevel: ins.riskLevel,
+    };
+
+    if (onSaveDocument) onSaveDocument(updatedDoc);
+    if (onUpdateDocument && onUpdateDocument !== onSaveDocument) onUpdateDocument(updatedDoc);
+
+    setSavedInsightDocId(ins.id);
+    setCopiedReportToast(`'${ins.clientName}' 어르신의 사례관리 기록지에 3줄 요약이 자동 저장되었습니다.`);
+    setTimeout(() => {
+      setSavedInsightDocId(null);
+      setCopiedReportToast(null);
+    }, 4000);
+  };
+
+  const handleOpenFormForInsight = (ins: ConsultationInsight, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const targetClient = clients.find((c) => c.id === ins.clientId) || clients[0];
+    if (targetClient && onOpenFormForClient) {
+      onOpenFormForClient(targetClient);
+      setCopiedReportToast(`'${ins.clientName}' 어르신의 서식 편집기가 열렸습니다.`);
+      setTimeout(() => setCopiedReportToast(null), 3000);
+    }
+  };
+
   return (
     <div
       className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200 dark:border-stone-800 shadow-xs overflow-hidden transition-all"
@@ -746,6 +957,26 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
         <div className="flex border-b border-stone-200 dark:border-stone-800 bg-stone-100/60 dark:bg-[#1A1614] px-5 pt-2 gap-2 text-xs overflow-x-auto scrollbar-none">
           <button
             type="button"
+            onClick={() => setActiveAnalysisTab('cards')}
+            className={`pb-2.5 px-3 font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeAnalysisTab === 'cards'
+                ? 'border-amber-600 text-amber-900 dark:text-amber-300'
+                : 'border-transparent text-stone-500 dark:text-stone-400 hover:text-stone-800'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>AI 상담 요약 인사이트 카드</span>
+            <span className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded-full ${
+              customInsights.length > 0
+                ? 'bg-amber-500 text-white animate-pulse'
+                : 'bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300'
+            }`}>
+              {activeInsightCards.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveAnalysisTab('insights')}
             className={`pb-2.5 px-3 font-bold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
               activeAnalysisTab === 'insights'
@@ -788,8 +1019,442 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
       {/* Body Content */}
       {!isMinimized && (
         <div className="p-5 sm:p-6 space-y-6">
+          {/* TAB 0: AI CONSULTATION INSIGHT CARDS */}
+          {activeAnalysisTab === 'cards' && (
+            <div className="space-y-5">
+              {/* Header Bar & Quick Filters */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-amber-50/80 via-stone-50/60 to-teal-50/60 dark:from-amber-950/30 dark:via-[#251E1A] dark:to-teal-950/30 border border-amber-200/80 dark:border-amber-800/60 shadow-2xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-600 text-white shadow-2xs">
+                      <Sparkles className="w-3 h-3" />
+                      실시간 AI 녹취 분석 연동
+                    </span>
+                    <span className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      실시간 자동 동기화 활성
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    AI 상담 녹취 핵심 요약 카드 목록
+                  </h3>
+                  <p className="text-xs text-stone-600 dark:text-stone-400">
+                    AI가 분석한 어르신의 3줄 핵심 요약(신체·정서·조치계획)이 실시간 카드로 생성되어 즉시 연계·저장할 수 있습니다.
+                  </p>
+                </div>
+
+                {/* Stat Badges */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#1E1916] border border-stone-200 dark:border-stone-800 text-center shadow-2xs">
+                    <div className="text-[10px] text-stone-500 dark:text-stone-400">총 요약 카드</div>
+                    <div className="text-sm font-extrabold text-stone-900 dark:text-stone-100">
+                      {allInitialPlusCustom.length} <span className="text-[10px] font-normal text-stone-500">건</span>
+                    </div>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-center shadow-2xs">
+                    <div className="text-[10px] text-rose-600 dark:text-rose-400">고위험군</div>
+                    <div className="text-sm font-extrabold text-rose-600 dark:text-rose-400">
+                      {allInitialPlusCustom.filter(i => i.riskLevel === '고위험').length} <span className="text-[10px] font-normal text-rose-500">건</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter & Search Toolbar */}
+              <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-stone-50/70 dark:bg-[#251E1A] p-3 rounded-xl border border-stone-200/90 dark:border-stone-800">
+                {/* Search Input */}
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchInsightQuery}
+                    onChange={(e) => setSearchInsightQuery(e.target.value)}
+                    placeholder="어르신 성함, 욕구, 질환, 추천 서비스 검색..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-[#1E1916] border border-stone-300 dark:border-stone-700 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                  {searchInsightQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchInsightQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                  <button
+                    type="button"
+                    onClick={() => setInsightRiskFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                      insightRiskFilter === 'all'
+                        ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900'
+                        : 'bg-white dark:bg-[#1E1916] text-stone-600 dark:text-stone-400 border border-stone-200 dark:border-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    전체 ({allInitialPlusCustom.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setInsightRiskFilter('high_risk')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                      insightRiskFilter === 'high_risk'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-white dark:bg-[#1E1916] text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800 hover:bg-rose-50'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                    고위험 ({allInitialPlusCustom.filter(i => i.riskLevel === '고위험').length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setInsightRiskFilter('urgent')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                      insightRiskFilter === 'urgent'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-white dark:bg-[#1E1916] text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 hover:bg-amber-50'
+                    }`}
+                  >
+                    <AlertTriangle className="w-3 h-3 text-amber-500" />
+                    긴급 연계 ({allInitialPlusCustom.filter(i => i.isUrgent).length})
+                  </button>
+
+                  {customInsights.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setInsightRiskFilter('ai_live')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                        insightRiskFilter === 'ai_live'
+                          ? 'bg-teal-700 text-white'
+                          : 'bg-white dark:bg-[#1E1916] text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 hover:bg-teal-50'
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3 text-teal-500 animate-pulse" />
+                      실시간 AI 분석 ({customInsights.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Cards Grid */}
+              {activeInsightCards.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeInsightCards.map((ins) => {
+                    const client = clients.find((c) => c.id === ins.clientId);
+                    const isPinned = pinnedInsightIds.includes(ins.id);
+                    const isLiveCustom = customInsights.some((ci) => ci.id === ins.id);
+                    const isPlaying = playingTtsInsightId === ins.id;
+                    const isCopied = copiedInsightId === ins.id;
+                    const isSaved = savedInsightDocId === ins.id;
+
+                    const isHighRisk = ins.riskLevel === '고위험';
+                    const isMediumRisk = ins.riskLevel === '중위험';
+
+                    return (
+                      <div
+                        key={ins.id}
+                        className={`relative rounded-2xl border transition-all duration-200 flex flex-col justify-between overflow-hidden shadow-xs hover:shadow-md ${
+                          isPinned
+                            ? 'border-amber-400 dark:border-amber-600/80 bg-amber-50/20 dark:bg-amber-950/20 ring-1 ring-amber-400/50'
+                            : isLiveCustom
+                            ? 'border-teal-400 dark:border-teal-600/80 bg-teal-50/15 dark:bg-teal-950/15 ring-1 ring-teal-400/40'
+                            : 'border-stone-200/90 dark:border-stone-800 bg-white dark:bg-[#231E1B]'
+                        }`}
+                      >
+                        {/* Top Accent Strip */}
+                        <div
+                          className={`h-1.5 w-full ${
+                            isHighRisk
+                              ? 'bg-gradient-to-r from-rose-500 to-rose-600'
+                              : isMediumRisk
+                              ? 'bg-gradient-to-r from-amber-500 to-amber-600'
+                              : 'bg-gradient-to-r from-emerald-500 to-teal-500'
+                          }`}
+                        />
+
+                        {/* Card Header */}
+                        <div className="p-4 border-b border-stone-100 dark:border-stone-800/80 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                                  isHighRisk
+                                    ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200'
+                                    : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-200'
+                                }`}
+                              >
+                                {ins.clientName?.slice(0, 2) || '어르신'}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <h4 className="text-sm font-extrabold text-stone-900 dark:text-stone-100">
+                                    {ins.clientName} 어르신
+                                  </h4>
+                                  {client && (
+                                    <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                                      ({client.age}세·{client.gender})
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-stone-400 dark:text-stone-500">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{ins.timestamp}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Header Badges & Pin/Delete */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border flex items-center gap-1 ${
+                                  isHighRisk
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'
+                                    : isMediumRisk
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800'
+                                }`}
+                              >
+                                {isHighRisk && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>}
+                                {ins.riskLevel}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleTogglePinInsight(ins.id, e)}
+                                className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                                  isPinned
+                                    ? 'text-amber-600 bg-amber-100 dark:bg-amber-900/60'
+                                    : 'text-stone-400 hover:text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-800'
+                                }`}
+                                title={isPinned ? '상단 고정 해제' : '상단 고정'}
+                              >
+                                <Pin className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteInsightCard(ins.id, e)}
+                                className="p-1 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                                title="카드 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Real-time Badge if pushed from AI Studio */}
+                          {isLiveCustom && (
+                            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-100/80 dark:bg-teal-950/80 text-teal-800 dark:text-teal-300 text-[10px] font-bold border border-teal-300/80 dark:border-teal-700">
+                              <Sparkles className="w-3 h-3 text-teal-600 animate-pulse" />
+                              <span>AI 녹취 실시간 생성 반영 건</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Card Body: 3-Line Core Summary */}
+                        <div className="p-4 space-y-3 flex-1">
+                          <div className="space-y-2">
+                            {ins.threeLineSummary && ins.threeLineSummary.length > 0 ? (
+                              ins.threeLineSummary.map((line, idx) => {
+                                const isHealth = idx === 0 || line.includes('신체') || line.includes('건강');
+                                const isEmotion = idx === 1 || line.includes('정서') || line.includes('욕구');
+                                const isAction = idx === 2 || line.includes('조치') || line.includes('계획');
+
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`p-2.5 rounded-xl border text-xs leading-relaxed transition-all ${
+                                      isHealth
+                                        ? 'bg-rose-50/60 dark:bg-rose-950/30 border-rose-200/70 dark:border-rose-900/60 text-stone-800 dark:text-stone-200'
+                                        : isEmotion
+                                        ? 'bg-purple-50/60 dark:bg-purple-950/30 border-purple-200/70 dark:border-purple-900/60 text-stone-800 dark:text-stone-200'
+                                        : 'bg-teal-50/60 dark:bg-teal-950/30 border-teal-200/70 dark:border-teal-900/60 text-stone-800 dark:text-stone-200 font-medium'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-1.5">
+                                      <span className="font-bold text-[11px] shrink-0">
+                                        {isHealth ? '🏃‍♂️' : isEmotion ? '💙' : '⚡'}
+                                      </span>
+                                      <p className="flex-1">{line}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <p className="text-xs text-stone-500">요약 정보가 없습니다.</p>
+                            )}
+                          </div>
+
+                          {/* Key Issues Tags */}
+                          {ins.keyIssues && ins.keyIssues.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {ins.keyIssues.map((issue, kidx) => (
+                                <span
+                                  key={kidx}
+                                  className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-[10px] font-semibold border border-stone-200 dark:border-stone-700"
+                                >
+                                  #{issue}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Recommended Service Banner */}
+                          {ins.recommendedService && (
+                            <div className="p-2 rounded-xl bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/80 flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-1.5 text-amber-950 dark:text-amber-200 text-[11px]">
+                                <Sparkle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                <span className="font-bold">추천 연계:</span>
+                                <span className="font-semibold text-stone-800 dark:text-stone-200 truncate">
+                                  {ins.recommendedService}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Card Footer: Action Toolbar */}
+                        <div className="p-3 bg-stone-50/80 dark:bg-[#1E1916] border-t border-stone-100 dark:border-stone-800/80 flex flex-wrap items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1">
+                            {/* TTS Audio Readout */}
+                            <button
+                              type="button"
+                              onClick={(e) => handlePlayInsightTts(ins, e)}
+                              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                                isPlaying
+                                  ? 'bg-amber-600 text-white'
+                                  : 'text-stone-600 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-stone-800'
+                              }`}
+                              title={isPlaying ? '음성 중지' : '3줄 요약 음성 듣기'}
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                              <span className="text-[11px]">{isPlaying ? '정지' : '듣기'}</span>
+                            </button>
+
+                            {/* Copy Summary */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyInsightCardSummary(ins, e)}
+                              className="p-1.5 rounded-lg text-xs font-semibold text-stone-600 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-stone-800 flex items-center gap-1 transition-colors cursor-pointer"
+                              title="3줄 요약 클립보드 복사"
+                            >
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span className="text-[11px]">{isCopied ? '복사됨' : '복사'}</span>
+                            </button>
+
+                            {/* Auto-Save to CaseDoc */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleAutoSaveInsightToCaseDoc(ins, e)}
+                              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                                isSaved
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60'
+                              }`}
+                              title="어르신의 상담 서식(기록지) '상담 내용'에 자동 저장"
+                            >
+                              {isSaved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                              <span className="text-[11px]">{isSaved ? '저장됨' : '서식에 저장'}</span>
+                            </button>
+                          </div>
+
+                          {/* Open in Form Editor */}
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenFormForInsight(ins, e)}
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold text-white bg-amber-700 hover:bg-amber-600 shadow-2xs flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="서식 작성기로 이동하여 작성하기"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>서식 작성</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-12 text-center rounded-2xl bg-stone-50 dark:bg-[#251E1A] border border-dashed border-stone-300 dark:border-stone-700 space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 mx-auto flex items-center justify-center">
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    조건에 일치하는 AI 상담 인사이트 카드가 없습니다
+                  </h4>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 max-w-md mx-auto">
+                    검색어나 필터를 초기화하거나, AI 녹취 분석기에서 상담 오디오를 분석하면 자동으로 새로운 카드가 생성되어 여기에 즉시 반영됩니다.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchInsightQuery('');
+                      setInsightRiskFilter('all');
+                      setSelectedClientId('all');
+                    }}
+                    className="px-3 py-1.5 text-xs font-bold bg-amber-700 hover:bg-amber-600 text-white rounded-xl shadow-2xs transition-colors cursor-pointer"
+                  >
+                    필터 전체 초기화
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeAnalysisTab === 'insights' && (
             <>
+              {/* 🎙️ Quick AI Insight Cards Preview Banner inside Tab 1 */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-50 via-stone-50 to-teal-50 dark:from-amber-950/40 dark:via-[#231E1B] dark:to-teal-950/40 border border-amber-300/80 dark:border-amber-700/60 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                    <h4 className="text-xs font-extrabold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      실시간 AI 상담 3줄 요약 카드 ({activeInsightCards.length}건)
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAnalysisTab('cards')}
+                    className="text-xs font-bold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>전체 카드 뷰로 이동</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {activeInsightCards.slice(0, 3).map((ins) => (
+                    <div
+                      key={ins.id}
+                      onClick={() => setActiveAnalysisTab('cards')}
+                      className="p-3 rounded-xl bg-white dark:bg-[#1E1916] border border-stone-200 dark:border-stone-800 shadow-2xs hover:border-amber-400 cursor-pointer space-y-1.5 transition-all"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-extrabold text-stone-900 dark:text-stone-100">
+                          {ins.clientName} 어르신
+                        </span>
+                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                          ins.riskLevel === '고위험' ? 'text-rose-600 bg-rose-50' : 'text-emerald-600 bg-emerald-50'
+                        }`}>
+                          {ins.riskLevel}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-stone-600 dark:text-stone-300 line-clamp-2 leading-relaxed">
+                        {ins.threeLineSummary[0] || ins.threeLineSummary.join(' ')}
+                      </p>
+                      <div className="text-[10px] text-teal-700 dark:text-teal-400 font-medium truncate">
+                        연계: {ins.recommendedService}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* ⚠️ Warning Banner if High Risk or Sudden Drop */}
               {hasPsychologicalDrop && (
                 <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/80 flex items-center justify-between gap-3 text-xs">

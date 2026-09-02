@@ -19,7 +19,10 @@ import { ClientProfile, RiskLevel, LivingType, WelfareType, DocumentType } from 
 interface NewClientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddClient: (newClient: ClientProfile, immediateAction?: 'ai_consultation' | 'intake_form' | 'none') => void;
+  onAddClient?: (newClient: ClientProfile, immediateAction?: 'ai_consultation' | 'intake_form' | 'none') => void;
+  onSaveClient?: (newClient: ClientProfile) => void;
+  onStartAIConsultation?: (newClient: ClientProfile) => void;
+  onStartIntakeForm?: (newClient: ClientProfile) => void;
   agencyName?: string;
   workerName?: string;
 }
@@ -28,7 +31,10 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   isOpen,
   onClose,
   onAddClient,
-  agencyName = '도봉재가노인지원서비스센터',
+  onSaveClient,
+  onStartAIConsultation,
+  onStartIntakeForm,
+  agencyName = '사회복지시설 사례관리팀',
   workerName = '이현정',
 }) => {
   const [name, setName] = useState<string>('');
@@ -40,7 +46,7 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
   const [livingType, setLivingType] = useState<LivingType>('독거노인');
   const [welfareType, setWelfareType] = useState<WelfareType>('기초생활수급자(생계/의료)');
   const [longTermCareStatus, setLongTermCareStatus] = useState<any>('등급외 B');
-  const [chronicDiseases, setChronicDiseases] = useState<string>('고혈압, 관절염, 당뇨');
+  const [chronicDiseases, setChronicDiseases] = useState<string>('고혈압, 관절염, 당뇨, 척추협착증');
   const [riskLevel, setRiskLevel] = useState<RiskLevel>('고위험');
   const [emergencyName, setEmergencyName] = useState<string>('');
   const [emergencyRel, setEmergencyRel] = useState<string>('자녀');
@@ -83,7 +89,20 @@ export const NewClientModal: React.FC<NewClientModalProps> = ({
       visitPriority: riskLevel === '고위험' ? '긴급' : riskLevel === '중위험' ? '우선' : '일반',
     };
 
-    onAddClient(newClient, action);
+    // 1. Invoke onAddClient unified handler if provided
+    if (onAddClient) {
+      onAddClient(newClient, action);
+    }
+
+    // 2. Invoke specific action callback
+    if (action === 'ai_consultation' && onStartAIConsultation) {
+      onStartAIConsultation(newClient);
+    } else if (action === 'intake_form' && onStartIntakeForm) {
+      onStartIntakeForm(newClient);
+    } else if (action === 'none' && onSaveClient) {
+      onSaveClient(newClient);
+    }
+
     onClose();
   };
 

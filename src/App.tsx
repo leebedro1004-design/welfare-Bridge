@@ -954,6 +954,14 @@ export default function App() {
       <NewClientModal
         isOpen={isNewClientModalOpen}
         onClose={() => setIsNewClientModalOpen(false)}
+        onAddClient={(newClient, immediateAction) => {
+          handleAddClient(newClient);
+          if (immediateAction === 'ai_consultation') {
+            handleSelectClientForConsultation(newClient);
+          } else if (immediateAction === 'intake_form') {
+            handleSelectClientForForm(newClient, 'intake');
+          }
+        }}
         onSaveClient={(newClient) => {
           handleAddClient(newClient);
         }}
@@ -965,6 +973,8 @@ export default function App() {
           handleAddClient(newClient);
           handleSelectClientForForm(newClient, 'intake');
         }}
+        agencyName={userSettings.agencyName || userSettings.institutionName || '사회복지시설 사례관리팀'}
+        workerName={userSettings.workerName || userSettings.defaultWorkerName || googleUser?.name || '사회복지사'}
       />
 
       {/* Major Legal Forms Quick Modal Launcher (주요 법정 서식 빠른 런처 모달) */}

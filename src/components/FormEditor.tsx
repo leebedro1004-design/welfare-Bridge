@@ -46,13 +46,17 @@ import {
   Mic,
   MicOff,
   Shrink,
-  Edit3
+  Edit3,
+  CheckCheck
 } from 'lucide-react';
 import { CaseDocument, ClientProfile, DocumentType, UserSettings } from '../types';
 import { DOCUMENT_TYPE_LABELS, ORDERED_DOC_TYPES, createEmptyDocument } from '../utils/documentTemplates';
 import { ConditionPresetId, CONDITION_PRESETS } from '../data/conditionPresets';
 import { DocumentAuditModal } from './DocumentAuditModal';
 import { OfficialPrintExportModal } from './OfficialPrintExportModal';
+import { AIHumanCollaborationMode } from './AIHumanCollaborationMode';
+import { InlineAICollaborationField, CollaborationTopBanner } from './AICollaborationInlineControls';
+import { CaseLifecycleProgressBar } from './CaseLifecycleProgressBar';
 import { focusSoundService, SoundType } from '../utils/focusSoundService';
 import { IntakeFormView } from './forms/IntakeFormView';
 import { AssessmentFormView } from './forms/AssessmentFormView';
@@ -97,8 +101,25 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   const [isAuditModalOpen, setIsAuditModalOpen] = useState<boolean>(false);
   const [isPresetModalOpen, setIsPresetModalOpen] = useState<boolean>(false);
   const [isOfficialPrintModalOpen, setIsOfficialPrintModalOpen] = useState<boolean>(false);
+  const [isCollaborationModalOpen, setIsCollaborationModalOpen] = useState<boolean>(false);
+  const [isInlineCollaborationActive, setIsInlineCollaborationActive] = useState<boolean>(true);
+  const [collaborationNoticeToast, setCollaborationNoticeToast] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState<ConditionPresetId>('standard');
   const [presetAppliedToast, setPresetAppliedToast] = useState<string | null>(null);
+
+  // Batch Accept all AI Proposals
+  const handleAcceptAllAIInlineProposals = () => {
+    try {
+      confetti({
+        particleCount: 50,
+        spread: 70,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {}
+
+    setCollaborationNoticeToast('🎉 모든 AI 초안 제안 항목이 성공적으로 일괄 수락 및 확정되었습니다.');
+    setTimeout(() => setCollaborationNoticeToast(null), 3500);
+  };
 
   // Focus Mode State (집중 문서 모드 - 전체 앱 다크모드와 별도 테마 및 집중 환경 지원)
   const [isFocusMode, setIsFocusMode] = useState<boolean>(false);
@@ -646,6 +667,13 @@ export const FormEditor: React.FC<FormEditorProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* 5-Stage Case Management Progress Bar (사례관리 진행 상황바: 상담 기록 -> AI 추출 -> 협업 검토 -> 작성 완료 -> 최종 결재) */}
+      <CaseLifecycleProgressBar
+        document={doc}
+        onStatusChange={(newStatus) => handleFieldChange('status', newStatus)}
+        onOpenCollaboration={() => setIsCollaborationModalOpen(true)}
+      />
+
       {/* 10-Step Standard Lifecycle Stepper (Page 1 ~ 25) */}
       <div className="bg-white dark:bg-[#1E1916] rounded-2xl border border-stone-200/90 dark:border-stone-800 p-3 shadow-xs transition-colors">
         <div className="flex items-center justify-between px-2 pb-2 mb-2 border-b border-stone-100 dark:border-stone-800/80 text-xs">
@@ -751,6 +779,34 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 <span>음성 구두 받아쓰기</span>
               </>
             )}
+          </button>
+
+          {/* AI-Human Collaboration Mode Toggle Button */}
+          <button
+            id="btn-toggle-ai-collaboration-mode"
+            type="button"
+            onClick={() => setIsInlineCollaborationActive(!isInlineCollaborationActive)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shadow-xs ${
+              isInlineCollaborationActive
+                ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white border-amber-400 ring-2 ring-amber-400/40'
+                : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border-stone-300 dark:border-stone-700 hover:bg-stone-200'
+            }`}
+            title="서식 내 AI 초안 텍스트 하이라이트 및 항목별 제안 수락/수정 인라인 모드 토글"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${isInlineCollaborationActive ? 'animate-spin text-amber-100' : 'text-amber-600'}`} />
+            <span>AI-인간 협업 모드: {isInlineCollaborationActive ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {/* AI Collaboration Full Modal Button */}
+          <button
+            id="btn-open-ai-collaboration"
+            type="button"
+            onClick={() => setIsCollaborationModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-all cursor-pointer shadow-xs"
+            title="AI 초안 항목별 상세 비교 및 전수 검토 모달"
+          >
+            <Eye className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span>항목별 전수 검토창</span>
           </button>
 
           {/* Condition Preset Template Picker */}
@@ -945,6 +1001,36 @@ export const FormEditor: React.FC<FormEditorProps> = ({
         client={clientInfo}
         onApplyRefinement={(field, text) => {
           handleFieldChange(field as keyof CaseDocument, text);
+        }}
+      />
+
+      {/* AI-Human Collaboration Edit Mode Modal */}
+      <AIHumanCollaborationMode
+        isOpen={isCollaborationModalOpen}
+        onClose={() => setIsCollaborationModalOpen(false)}
+        document={doc}
+        onApplyFieldUpdate={(fieldKey, val) => {
+          if (fieldKey in doc) {
+            handleFieldChange(fieldKey as keyof CaseDocument, val);
+          } else {
+            handleSpecificFieldChange(fieldKey, val);
+          }
+        }}
+        onApplyBatchUpdates={(updates) => {
+          setDoc((prev) => {
+            const next = { ...prev };
+            Object.entries(updates).forEach(([k, v]) => {
+              if (k in next) {
+                (next as any)[k] = v;
+              } else {
+                next.formSpecificFields = {
+                  ...next.formSpecificFields,
+                  [k]: v,
+                };
+              }
+            });
+            return next;
+          });
         }}
       />
 
@@ -1657,6 +1743,21 @@ export const FormEditor: React.FC<FormEditorProps> = ({
         </div>
       )}
 
+      {collaborationNoticeToast && (
+        <div className="fixed bottom-6 left-6 z-50 bg-stone-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl border border-amber-500/50 flex items-center gap-2 animate-slide-in">
+          <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+          <span>{collaborationNoticeToast}</span>
+        </div>
+      )}
+
+      {/* AI-Human Collaboration Mode Top Banner */}
+      <CollaborationTopBanner
+        isCollaborationMode={isInlineCollaborationActive}
+        onToggleCollaborationMode={(val) => setIsInlineCollaborationActive(val)}
+        onAcceptAll={handleAcceptAllAIInlineProposals}
+        onOpenFullReviewModal={() => setIsCollaborationModalOpen(true)}
+      />
+
       {/* Main Standard Document Sheet (Printable Layout) */}
       <div
         ref={printRef}
@@ -1725,6 +1826,177 @@ export const FormEditor: React.FC<FormEditorProps> = ({
             );
           })()}
         </div>
+
+        {/* AI-Human Collaboration In-Place Review Area (Visible when isInlineCollaborationActive is ON) */}
+        {isInlineCollaborationActive && (
+          <div className="p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-400/80 dark:border-amber-600/80 space-y-4 animate-fade-in shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-3 border-b border-amber-300/50 dark:border-amber-700/50">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500 text-stone-950">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-extrabold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                    <span>AI 초안 실시간 검토 & 보완 영역 (AI-인간 협업 모드)</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200 font-bold">
+                      실시간 하이라이트 중
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-stone-600 dark:text-stone-300">
+                    상담 녹취 및 AI 분석에서 추출된 문장을 항목별로 검토하여 수락하거나, 대안 문장으로 교체 및 직접 수정하세요.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleAcceptAllAIInlineProposals}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  <span>전체 제안 수락</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <InlineAICollaborationField
+                id="inline-title"
+                label="문서 제목 / 핵심 개요"
+                fieldKey="title"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.title || ''}
+                onChange={(val) => handleFieldChange('title', val)}
+                confidence={96}
+                aiRationale="내담자 성명, 연령, 거주유형 및 초기 주호소 내용을 기반으로 표준 공문서 표제어 생성"
+                alternatives={[
+                  `[재가노인지원] ${doc.clientName || '어르신'} 어르신 만성질환 및 영양위기 통합사례관리 계획서`,
+                  `[사례관리] ${doc.clientName || '어르신'} 대상자 안전확인 및 일상생활지원 서비스 실행계획서`,
+                  `[초기사정] ${doc.clientName || '어르신'} 독거어르신 낙상예방 및 주거환경개선 지원서식`,
+                ]}
+                type="input"
+              />
+
+              <InlineAICollaborationField
+                id="inline-problem-needs"
+                label="1. 대상자의 주요 호소 및 핵심 욕구 (Problem & Needs)"
+                fieldKey="problemAndNeeds"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.formSpecificFields?.problemAndNeeds || doc.executiveSummary?.join('\n') || ''}
+                onChange={(val) => handleSpecificFieldChange('problemAndNeeds', val)}
+                confidence={94}
+                aiRationale="상담 대화록 상의 어르신 주호소(식사 곤란, 통증, 고립감)를 복지부 표준 욕구 범주로 구조화"
+                alternatives={[
+                  '퇴행성 관절염으로 인한 보행 불안정 및 화장실 이동 시 낙상 위험 호소. 주 1회 밑반찬으로는 주말 결식 우려 높아 영양 지원 욕구 높음.',
+                  '배우자 사별 후 만성 우울감 및 고립감 심화. 식욕 부진 및 규칙적 식사 거름으로 인한 체중 감소 관찰됨.',
+                  '노후 주택의 높은 문턱과 조명 조도 부족으로 주거 낙상 위험 노출. 지역사회 자원 연계 희망.',
+                ]}
+                rows={3}
+              />
+
+              <InlineAICollaborationField
+                id="inline-short-term-goals"
+                label="2. 해결목표 (장·단기 개입 목표)"
+                fieldKey="shortTermGoals"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={Array.isArray(doc.shortTermGoals) ? doc.shortTermGoals.join('\n') : (doc.shortTermGoals || '')}
+                onChange={(val) => {
+                  const lines = val.split('\n').filter((l) => l.trim().length > 0);
+                  handleFieldChange('shortTermGoals', lines);
+                }}
+                confidence={92}
+                aiRationale="SMART 기법 기반 구체적이고 측정 가능한 3~6개월 단위 복지 개입 목표 도출"
+                alternatives={[
+                  '1. 주 3회 밑반찬 배달 연계로 주 5일 이상 균형 잡힌 영양 섭취 유지\n2. 주거 내 안전손잡이 2개소 설치 및 미끄럼방지 매트 시공으로 낙상사고 0건 달성\n3. 주 1회 생활지원사 안전안부확인 방문으로 정서적 고립감 완화',
+                  '1. 고혈압·당뇨 약물 복약 순응도 90% 이상 달성 (달력형 약달력 제공)\n2. 복지관 어르신 건강체조 프로그램 월 4회 참여로 자립 보행능력 증진\n3. 긴급 위기 상황 대비 비상호출벨 작동 점검 완료',
+                ]}
+                rows={3}
+              />
+
+              <InlineAICollaborationField
+                id="inline-risk-rationale"
+                label="3. 내담자 특이사항 및 위기도 판정 근거 (Risk Factors)"
+                fieldKey="riskRationale"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.riskRationale || ''}
+                onChange={(val) => handleFieldChange('riskRationale', val)}
+                confidence={95}
+                aiRationale="만성질환 복합 여부, 거주안전도, 독거 취약성을 결합하여 위기도(고위험/중위험) 판정 근거 명시"
+                alternatives={[
+                  '양측 퇴행성 관절염 통증으로 실내 이동 시 벽을 짚고 다님. 욕실 바닥 타일 마모 및 문턱 5cm 이상으로 낙상 위험도 매우 높음. 독거 상태로 야간 응급상황 발생 시 대처 불가.',
+                  '최근 3개월간 체중 4kg 감소 및 수면장애 지속. 식사 거르는 횟수 주 3회 이상으로 영양결핍 및 건강악화 위험 상존.',
+                  '가족 부양체계 부재(자녀 연락두절). 경제적 취약계층으로 의료비 부담 가중 및 한파/폭염 시 냉난방 취약.',
+                ]}
+                rows={3}
+              />
+
+              <InlineAICollaborationField
+                id="inline-physical-health"
+                label="4. 신체기능 및 ADL/IADL 상태 (Physical & ADL)"
+                fieldKey="physicalHealthStatus"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.physicalHealthStatus || ''}
+                onChange={(val) => handleFieldChange('physicalHealthStatus', val)}
+                confidence={93}
+                aiRationale="기본적 일상생활(옷입기, 식사)과 도구적 일상생활(장보기, 가사) 수행 능력 분석"
+                alternatives={[
+                  '기본적 식사 및 착의는 자립 가능하나, 30분 이상 장거리 보행 및 계단 이용 시 극심한 통증. 무거운 물건 들기 및 대중교통 이용 불가능하여 장보기 IADL 전적 도움 필요.',
+                  '지팡이 등 보행보조기 의존 보행. 손가락 관절 변형으로 가스레인지 조작 및 단추 잠그기 시 소근육 조작 도움 필요.',
+                ]}
+                rows={3}
+              />
+
+              <InlineAICollaborationField
+                id="inline-emotional-cognitive"
+                label="5. 정서 및 인지 기능 상태 (Emotional & Cognitive)"
+                fieldKey="emotionalCognitiveStatus"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.emotionalCognitiveStatus || ''}
+                onChange={(val) => handleFieldChange('emotionalCognitiveStatus', val)}
+                confidence={91}
+                aiRationale="상담 중 발화 속도, 질문 이해도, 감정 표현(슬픔, 무기력)을 표준 척도 어조로 분석"
+                alternatives={[
+                  '시간, 장소, 인물에 대한 지남력 양호하며 의사소통 원활함. 다만 혼자 있는 시간에 외로움과 우울감을 자주 호소하며 활동 의욕 저하 관찰됨.',
+                  '최근 기억력 감퇴에 대한 불안감 호소. 단기 기억(복약 시간, 날짜) 일부 오차 발생하여 인지선별검사(CIST) 연계 요망.',
+                ]}
+                rows={2}
+              />
+
+              <InlineAICollaborationField
+                id="inline-housing"
+                label="6. 주거환경 안전성 및 거주 실태 (Housing Safety)"
+                fieldKey="housingEnvironment"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.housingEnvironment || ''}
+                onChange={(val) => handleFieldChange('housingEnvironment', val)}
+                confidence={94}
+                aiRationale="주택 형태, 화장실 안전바 유무, 문턱, 채광 및 환기 상태를 복지부 기준 점검"
+                alternatives={[
+                  '단독주택 지하/반지하층 거주로 통풍 및 환기 취약. 화장실 바닥 미끄럼방지 처리 부재 및 변기 옆 안전 손잡이 미설치 상태.',
+                  '노후 다세대 2층 거주로 가파른 외부 계단 이용 필요. 겨울철 동파 위험 및 결로 현상 있음. 실내 단차 3cm 존재.',
+                ]}
+                rows={2}
+              />
+
+              <InlineAICollaborationField
+                id="inline-opinion"
+                label="7. 사회복지사 종합 소견 및 개입 방향 (Social Worker Opinion)"
+                fieldKey="socialWorkerOpinion"
+                isCollaborationMode={isInlineCollaborationActive}
+                value={doc.socialWorkerOpinion || ''}
+                onChange={(val) => handleFieldChange('socialWorkerOpinion', val)}
+                confidence={97}
+                aiRationale="전체 상담 분석 결과를 바탕으로 한국사회복지사협회 윤리강령 및 보건복지부 공문서 양식에 부합하는 종합 전문 의견 작성"
+                alternatives={[
+                  `본 대상자는 고령의 독거 상태로, 신체적 관절 통증 및 낙상 위험이 높고 영양 결식 우려가 있는 중점 사례관리 대상자로 사정됨. 우선적으로 영양 밑반찬 배달 서비스(주 3회)와 주거 안전손잡이 설치 자원을 긴급 연계하고, 정기적 유선·방문 모니터링을 통해 고립감을 완화하며 건강 상태 변화를 면밀히 추적 관찰하고자 함.`,
+                  `대상자의 자기결정권을 존중하여 일상생활 자립을 지원하는 맞춤형 서비스 계획 수립이 요구됨. 장기요양보험 등급 신청 지원 및 지역사회 통합돌봄 자원을 단계별로 연계하여 지역사회 내 안전한 계속 거주(AIP: Aging in Place)를 지원할 계획임.`,
+                ]}
+                rows={4}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Dynamic 10-Form Sub-Component Render */}
         {doc.documentType === 'intake' && (
