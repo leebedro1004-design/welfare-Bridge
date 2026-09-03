@@ -1,6 +1,6 @@
 import React from 'react';
 import { CaseDocument, ClientProfile } from '../../types';
-import { Eye, CheckCircle2 } from 'lucide-react';
+import { Eye, CheckCircle2, Sparkles, MessageSquare, Target, FileText } from 'lucide-react';
 import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
@@ -19,6 +19,7 @@ export const MonitoringFormView: React.FC<FormProps> = ({
   readOnly = false,
 }) => {
   const fields = doc.formSpecificFields || {};
+  const isAutoFilled = Boolean(fields.counselingPurpose || fields.counselingContent || fields.aiAutoFilledTimestamp);
   const scores: Record<string, number> = fields.monitoringSatisfactionScores || {
     q1: 5,
     q2: 5,
@@ -51,11 +52,19 @@ export const MonitoringFormView: React.FC<FormProps> = ({
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
       {/* Header */}
       <div className="text-center pb-4 border-b-2 border-stone-800 dark:border-stone-200">
-        <h2 className="text-2xl font-black tracking-widest text-stone-900 dark:text-stone-100">
-          재가노인지원서비스 모니터링 기록지
-        </h2>
-        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-          (재가노인지원서비스 사례관리 표준 서식 7호 - Page 16)
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <h2 className="text-2xl font-black tracking-widest text-stone-900 dark:text-stone-100">
+            재가노인지원서비스 모니터링 및 상담기록지
+          </h2>
+          {isAutoFilled && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+              <span>AI 서식 자동 완성 매핑됨</span>
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">
+          (재가노인지원서비스 사례관리 표준 법정 서식 7호 - 상담기록지 연동)
         </p>
       </div>
 
@@ -72,33 +81,119 @@ export const MonitoringFormView: React.FC<FormProps> = ({
           />
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-stone-500">모니터링일:</span>
+          <span className="text-stone-500">상담·모니터링일:</span>
           <input
             type="text"
             disabled={readOnly}
-            value={fields.monitoringDate || '2019. 07. 15'}
+            value={fields.monitoringDate || new Date().toISOString().slice(0, 10)}
             onChange={(e) => onSpecificChange('monitoringDate', e.target.value)}
-            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-28"
+            className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-28 font-mono"
           />
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-stone-500">구분/방법:</span>
+          <span className="text-stone-500">상담 방법/구분:</span>
           <input
             type="text"
             disabled={readOnly}
-            value={fields.monitoringMethod || '정기 / 방문상담'}
-            onChange={(e) => onSpecificChange('monitoringMethod', e.target.value)}
+            value={fields.counselingMethod || fields.monitoringMethod || '방문상담 / 정기상담'}
+            onChange={(e) => {
+              onSpecificChange('counselingMethod', e.target.value);
+              onSpecificChange('monitoringMethod', e.target.value);
+            }}
             className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32"
           />
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-stone-500">담당자:</span>
+          <span className="text-stone-500">상담·기록자:</span>
           <input
             type="text"
             disabled={readOnly}
             value={doc.author || '이상호 사회복지사'}
             onChange={(e) => onChange('author', e.target.value)}
             className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32 font-medium"
+          />
+        </div>
+      </div>
+
+      {/* 🎯 Statutory Consultation Form Specific Fields: Counseling Purpose & Content (법정 서식 상담 목적 & 상담 내용) */}
+      <div className="border-2 border-amber-300/80 dark:border-amber-700/60 rounded-xl p-4 sm:p-5 bg-gradient-to-b from-amber-50/40 via-white to-white dark:from-[#251E1A] dark:via-[#1E1916] dark:to-[#1E1916] space-y-4 text-xs shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-amber-200 dark:border-amber-800/60">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-amber-600 text-white flex items-center justify-center">
+              <FileText className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                <span>■ 상담 기록부 (상담 목적 및 상담 내용)</span>
+                <span className="text-[11px] px-1.5 py-0.2 rounded bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-normal">
+                  법정 필수 서식 항목
+                </span>
+              </h3>
+              <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                AI 상담 녹취 분석 결과에서 원클릭으로 자동 추출 및 매핑되는 법정 상담 기록 필드입니다.
+              </p>
+            </div>
+          </div>
+          {fields.aiAutoFilledTimestamp && (
+            <span className="text-[11px] text-amber-700 dark:text-amber-300 font-mono bg-amber-100/70 dark:bg-amber-950/60 px-2 py-0.5 rounded">
+              자동완성 시각: {fields.aiAutoFilledTimestamp}
+            </span>
+          )}
+        </div>
+
+        {/* 1. 상담 목적 (Counseling Purpose) */}
+        <div>
+          <label className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-stone-900 dark:text-stone-100 mb-1.5">
+            <Target className="w-4 h-4 text-amber-600" />
+            <span>1. 상담 목적 (Consultation Purpose)</span>
+            <span className="text-[11px] font-normal text-stone-500">
+              - 내담 어르신의 주 호소 및 개입 욕구 기반 설정 목적
+            </span>
+          </label>
+          <input
+            type="text"
+            id="field-counseling-purpose"
+            disabled={readOnly}
+            placeholder="상담 목적을 입력하거나 AI 서식 자동 완성을 실행하세요. (예: 어르신의 일상생활 자립 유지 및 결식 예방을 위한 재가복지서비스 연계)"
+            value={fields.counselingPurpose || ''}
+            onChange={(e) => onSpecificChange('counselingPurpose', e.target.value)}
+            className="w-full p-2.5 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-[#1E1916] text-xs font-semibold text-stone-900 dark:text-stone-100 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+          />
+        </div>
+
+        {/* 2. 상담 내용 (Counseling Content) */}
+        <div>
+          <label className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-stone-900 dark:text-stone-100 mb-1.5">
+            <MessageSquare className="w-4 h-4 text-amber-600" />
+            <span>2. 상담 내용 (Consultation Content & Observation Notes)</span>
+            <span className="text-[11px] font-normal text-stone-500">
+              - 개요, 건강상태, 정서/환경, 욕구, 종합의견 등 표준 서술
+            </span>
+          </label>
+          <textarea
+            id="field-counseling-content"
+            rows={7}
+            disabled={readOnly}
+            placeholder="상담 면담 상세 내용을 입력하거나 AI 서식 자동 완성으로 채워집니다..."
+            value={fields.counselingContent || ''}
+            onChange={(e) => onSpecificChange('counselingContent', e.target.value)}
+            className="w-full p-3 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-[#1E1916] text-xs leading-relaxed text-stone-900 dark:text-stone-100 font-sans focus:ring-2 focus:ring-amber-500 focus:outline-none font-medium whitespace-pre-wrap"
+          />
+        </div>
+
+        {/* 3. 조치 및 향후 계획 (Next Plan) */}
+        <div>
+          <label className="font-bold text-xs text-stone-800 dark:text-stone-200 block mb-1">
+            3. 상담 조치사항 및 향후 관리 계획
+          </label>
+          <input
+            type="text"
+            id="field-counseling-next-plan"
+            disabled={readOnly}
+            placeholder="상담 후속 조치 계획 (예: 밑반찬 주 2회 배달 지속, 주 1회 안부전화 유지)"
+            value={fields.counselingNextPlan || ''}
+            onChange={(e) => onSpecificChange('counselingNextPlan', e.target.value)}
+            className="w-full p-2 border border-stone-300 dark:border-stone-700 rounded-lg bg-stone-50 dark:bg-[#251E1A] text-xs"
           />
         </div>
       </div>

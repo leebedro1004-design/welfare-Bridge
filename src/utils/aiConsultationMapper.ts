@@ -182,11 +182,33 @@ export function extractRealtimeConsultationSummary(
       title: `${clientName} 어르신 재가노인지원서비스 상담 및 모니터링 기록지`,
       socialWorkerOpinion: socialWorkerOpinion,
       formSpecificFields: {
+        counselingPurpose: primaryGoal,
+        counselingContent: `■ 1. 내담자 호소 및 면담 개요:
+• ${notes}
+
+■ 2. 신체·건강 및 일상생활(ADL) 상태:
+• ${healthCondition}
+
+■ 3. 심리·정서 및 거주 환경:
+• 정서 상태: ${primaryEmotion} (${emotionDescription})
+• 주거 환경: ${livingEnvironment}
+
+■ 4. 주요 확인 욕구 및 위험 요인:
+• 중점 욕구: ${keywords.join(', ')}
+• 긴급 위험 요인: ${urgentRisks.join(' / ')}
+
+■ 5. 사회복지사 종합 소견 및 개입 방향:
+• ${socialWorkerOpinion}`,
+        counselingMethod: '방문상담',
+        counselingCategory: '정기상담 및 모니터링',
+        counselingNextPlan: `밑반찬 배달 주 2회 지원 및 주 1회 정기 안부확인 지속 유지, 가정 내 낙상방지 안전바 설치 연계`,
         monitoringSummary: notes,
         counselingKeywords: keywords.join(', '),
         clientEmotionalResponse: primaryEmotion,
         monitoringSpecialRemarks: urgentRisks.join(' / '),
         monitoringPlan: '현 수립된 서비스 계획(밑반찬 주 2회, 안부확인 주 1회) 지속 유지 및 만족도 평가 실시',
+        monitoringNeedChanges: `${keywords.join(', ')} 지원 요구 지속`,
+        monitoringEnvironmentChanges: healthCondition,
       },
     },
   };
@@ -214,3 +236,157 @@ export function extractRealtimeConsultationSummary(
     mappedFieldsByDocType,
   };
 }
+
+/**
+ * Automatically maps consultation transcript and AI analysis results into a statutory legal form
+ * (e.g. Counseling & Monitoring Log, Intake Sheet, Assessment Record).
+ * Fills in key legal fields: 'counselingPurpose' (상담 목적) and 'counselingContent' (상담 내용).
+ */
+export function autoFillLegalFormWithConsultation(params: {
+  transcript: string;
+  analysisResult?: any;
+  client?: any;
+  targetDocType?: DocumentType;
+  existingDoc?: CaseDocument | null;
+}): CaseDocument {
+  const { transcript, analysisResult, client, targetDocType = 'monitoring', existingDoc } = params;
+  const clientName = client?.name || analysisResult?.clientName || '상담 어르신';
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toTimeString().slice(0, 5);
+
+  // Extract real-time consultation summary
+  const summary = extractRealtimeConsultationSummary(transcript, clientName, targetDocType);
+
+  // Derive explicit Consultation Purpose (상담 목적)
+  let derivedPurpose = '';
+  if (analysisResult?.primaryNeeds && analysisResult.primaryNeeds.length > 0) {
+    const mainNeedsStr = analysisResult.primaryNeeds.slice(0, 3).join(', ');
+    derivedPurpose = `${clientName} 어르신의 핵심 욕구(${mainNeedsStr}) 파악 및 일상생활 유지·결식 예방을 위한 재가노인지원서비스 연계 및 안전 모니터링`;
+  } else if (summary.consultationGoals?.primaryGoal) {
+    derivedPurpose = summary.consultationGoals.primaryGoal;
+  } else {
+    derivedPurpose = `${clientName} 어르신의 재가 생활 안전 유지, 만성질환 안부확인 및 복지욕구 사정을 위한 정기 방문 상담`;
+  }
+
+  // Derive structured Consultation Content (상담 내용)
+  const execSummaryLines = analysisResult?.executiveSummary || [];
+  const execSummaryText = execSummaryLines.length > 0
+    ? execSummaryLines.map((l: string) => `• ${l}`).join('\n')
+    : `• ${summary.clientSpecialRemarks.notes}`;
+
+  const healthText = analysisResult?.physicalHealthStatus || summary.clientSpecialRemarks.healthCondition;
+  const livingText = analysisResult?.housingEnvironment || summary.clientSpecialRemarks.livingEnvironment;
+  const emotionText = analysisResult?.emotionalCognitiveStatus || summary.clientEmotionState.description;
+  const workerOpinionText = analysisResult?.socialWorkerOpinion || summary.socialWorkerOpinion;
+  const riskText = analysisResult?.riskRationale || summary.clientSpecialRemarks.urgentRisks.join(', ');
+  const needsText = (analysisResult?.primaryNeeds && analysisResult.primaryNeeds.length > 0)
+    ? analysisResult.primaryNeeds.join(', ')
+    : summary.keywords.join(', ');
+
+  const derivedContent = `■ 1. 내담자 호소 및 상담 면담 개요:
+${execSummaryText}
+
+■ 2. 신체 기능 및 일상생활 수행(ADL) 점검:
+• 신체·건강 상태: ${healthText}
+• 거주 및 주거 안전: ${livingText}
+
+■ 3. 심리·정서 상태 및 사회적 지지망:
+• 정서 상태: ${emotionText}
+• 위기도 요인: ${riskText}
+
+■ 4. 주요 복지 욕구 및 신청 희망 서비스:
+• 도출된 핵심 욕구: ${needsText}
+• 단기 목표: ${summary.consultationGoals.shortTermGoals.join(' / ')}
+
+■ 5. 사회복지사 종합 소견 및 조치 계획:
+• ${workerOpinionText}`;
+
+  // Next intervention plan
+  const nextPlan = analysisResult?.recommendedServices && analysisResult.recommendedServices.length > 0
+    ? analysisResult.recommendedServices.map((s: any) => `${s.serviceName}(${s.frequency || '정기'}): ${s.purpose || '지원'}`).join(' / ')
+    : '주 2회 밑반찬 배달 연계 및 주 1회 이상 정기 유선/방문 안부확인 지속 유지';
+
+  // Base document to merge into
+  const baseDoc: CaseDocument = existingDoc
+    ? { ...existingDoc }
+    : {
+        id: `doc-autofill-${Date.now()}`,
+        clientId: client?.id || `client-${Date.now()}`,
+        clientName: clientName,
+        documentType: targetDocType,
+        title: `${clientName} 어르신 ${targetDocType === 'monitoring' ? '상담 및 모니터링 기록지' : '법정 서식'} (AI 자동 완성)`,
+        createdAt: `${dateStr} ${timeStr}`,
+        updatedAt: `${dateStr} ${timeStr}`,
+        author: client?.caseWorker || '이상호 사회복지사',
+        status: '작성완료',
+        riskLevel: (analysisResult?.riskLevel || '중위험') as any,
+        primaryNeeds: analysisResult?.primaryNeeds || summary.keywords,
+        shortTermGoals: summary.consultationGoals.shortTermGoals,
+        longTermGoals: summary.consultationGoals.longTermGoals,
+        recommendedServices: analysisResult?.recommendedServices || [
+          { serviceName: '밑반찬 배달 서비스', frequency: '주 2회', purpose: '결식 예방 및 영양 관리' },
+          { serviceName: '정기 방문 안부확인', frequency: '주 1회', purpose: '독거노인 안전망 점검' },
+        ],
+        formSpecificFields: {},
+      };
+
+  const autoFilledFields = [
+    'counselingPurpose',
+    'counselingContent',
+    'counselingMethod',
+    'counselingCategory',
+    'counselingNextPlan',
+    'monitoringSummary',
+    'monitoringNeedChanges',
+    'monitoringEnvironmentChanges',
+    'intakeSummary',
+    'intakeClientEmotion',
+    'intakeHealthStatus',
+    'intakeHousingSafety',
+    'problemAndNeeds',
+    'solutionAndGoals',
+  ];
+
+  return {
+    ...baseDoc,
+    updatedAt: `${dateStr} ${timeStr}`,
+    status: '작성완료',
+    sourceTranscript: transcript,
+    socialWorkerOpinion: workerOpinionText,
+    physicalHealthStatus: healthText,
+    emotionalCognitiveStatus: emotionText,
+    housingEnvironment: livingText,
+    riskRationale: riskText,
+    formSpecificFields: {
+      ...baseDoc.formSpecificFields,
+      // Core Auto-fill Legal Form Fields
+      counselingPurpose: derivedPurpose,
+      counselingContent: derivedContent,
+      counselingMethod: '방문상담',
+      counselingCategory: targetDocType === 'intake' ? '초기상담' : '정기상담 및 모니터링',
+      counselingNextPlan: nextPlan,
+      aiAutoFilledFields: autoFilledFields,
+      aiAutoFilledTimestamp: `${dateStr} ${timeStr}`,
+
+      // 7호 모니터링 및 상담일지 필드 호환
+      monitoringSummary: summary.clientSpecialRemarks.notes,
+      monitoringNeedChanges: `• ${needsText} 관련 서비스 유지 및 보완 희망`,
+      monitoringEnvironmentChanges: healthText,
+      monitoringDetailedNotes: derivedContent,
+      monitoringPlanResult: '서비스 유지',
+
+      // 1호 초기면접지 필드 호환
+      intakeSummary: summary.clientSpecialRemarks.notes,
+      intakeClientEmotion: summary.clientEmotionState.primaryEmotion,
+      intakeHealthStatus: healthText,
+      intakeHousingSafety: livingText,
+      intakeCounselorOpinion: workerOpinionText,
+
+      // 5호 서비스제공계획서 필드 호환
+      problemAndNeeds: `${clientName} 어르신은 고령 독거 및 만성질환으로 인해 ${needsText} 등의 복합 위험에 노출되어 있어 맞춤형 지원이 요구됨.`,
+      solutionAndGoals: nextPlan,
+    },
+  };
+}
+

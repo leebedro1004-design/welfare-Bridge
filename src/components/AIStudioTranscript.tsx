@@ -43,7 +43,10 @@ import {
   Tag,
   X,
   Activity,
-  FileCheck
+  FileCheck,
+  UploadCloud,
+  CheckCircle2,
+  Target,
 } from 'lucide-react';
 import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight } from '../types';
 import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument, createEmptyDocument } from '../utils/documentTemplates';
@@ -54,6 +57,8 @@ import {
   extractQuickInsightFromTranscript,
   AudioValidationResult,
 } from '../utils/audioValidator';
+import { prepareOptimizedAudioChunks, AudioChunkPayload, formatDurationKorean, getAudioDurationFast } from '../utils/audioChunker';
+import { autoFillLegalFormWithConsultation } from '../utils/aiConsultationMapper';
 import { PRESET_SCENARIOS } from '../data/mockData';
 import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuides';
 import { CounselingSentimentTrendChart } from './CounselingSentimentTrendChart';
@@ -567,6 +572,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     sizeMB: string;
     format: string;
     rawMime: string;
+    durationSec?: number;
+    durationFormatted?: string;
+    status: 'ready' | 'processing' | 'completed' | 'error';
+    statusText: string;
+    totalChunks?: number;
   } | null>(null);
   const [transcribingStatus, setTranscribingStatus] = useState<string>('');
   const [uploadedAudioUrl, setUploadedAudioUrl] = useState<string | null>(null);
@@ -578,6 +588,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const audioProgressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioElapsedTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Statutory Form Auto-Fill State & Handlers
+  const [isAutoFillModalOpen, setIsAutoFillModalOpen] = useState<boolean>(false);
+  const [autoFillTargetDocType, setAutoFillTargetDocType] = useState<DocumentType>('monitoring');
+  const [autoFillToast, setAutoFillToast] = useState<string | null>(null);
+
   // Audio STT Stages definition for visual progress breakdown
   const AUDIO_STT_STAGES = [
     { label: '파일 무결성 검증', desc: '오디오 스트림 분석 및 포맷 확인' },
@@ -585,6 +600,38 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     { label: 'AI 멀티모달 STT 음성인식', desc: 'Gemini 모델 음성 분석 및 화자 분리' },
     { label: '상담 대화록 생성', desc: '한국어 전문 복지 대화록 포맷팅' },
   ];
+
+  // Execute Statutory Form Auto-Fill: Maps counseling purpose & content directly to legal form
+  const handleExecuteAutoFillLegalForm = (targetType: DocumentType = autoFillTargetDocType) => {
+    if (!transcriptText.trim() && !analysisResult) {
+      setErrorMessage('서식을 자동 완성하기 위한 상담 대화록 또는 AI 분석 결과가 없습니다.');
+      return;
+    }
+
+    const targetClient = clients.find((c) => c.id === targetClientId) || selectedClient || clients[0];
+    
+    const filledDoc = autoFillLegalFormWithConsultation({
+      transcript: transcriptText,
+      analysisResult,
+      client: targetClient,
+      targetDocType: targetType,
+    });
+
+    try {
+      confetti({
+        particleCount: 65,
+        spread: 70,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {}
+
+    onGenerateDocument(filledDoc);
+    setIsAutoFillModalOpen(false);
+
+    const docLabel = DOCUMENT_TYPE_LABELS[targetType]?.short || '상담기록지';
+    setAutoFillToast(`🎉 법정 서식 [${docLabel}]의 '상담 목적'과 '상담 내용' 필드에 AI 상담 분석 결과가 원클릭으로 자동 매핑되었습니다!`);
+    setTimeout(() => setAutoFillToast(null), 5000);
+  };
 
   // Helper to detect audio format
   const getAudioFormat = (file: File) => {
@@ -617,12 +664,22 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
     const detectedFormat = validation.format;
 
+    // Fast initial duration detection
+    let initialDurationSec = 0;
+    try {
+      initialDurationSec = await getAudioDurationFast(file);
+    } catch (e) {}
+
     setAudioFileMeta({
       name: file.name,
       sizeKB,
       sizeMB,
       format: detectedFormat,
       rawMime: file.type || validation.normalizedMime,
+      durationSec: initialDurationSec || undefined,
+      durationFormatted: initialDurationSec ? formatDurationKorean(initialDurationSec) : '시간 계산 중...',
+      status: 'processing',
+      statusText: '음성 스트림 분석 및 대용량 규격 최적화 중...',
     });
 
     setIsTranscribingAudio(true);
@@ -644,52 +701,152 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setUploadedAudioUrl(audioUrl);
       setUploadedAudioFileName(file.name);
 
-      // Stage 1: File reading and Base64 encoding (Progress: 10% -> 35%)
-      setAudioProgress(20);
+      // Stage 1: Audio Analysis, Resampling & Smart Chunking
       setAudioStageIndex(1);
-      setTranscribingStatus(`오디오 데이터를 Gemini API 호환 규격으로 인코딩 및 정규화 중...`);
+      setAudioProgress(15);
+      setTranscribingStatus(`음성 스트림 분석 및 대용량 규격 최적화(16kHz 모노 변환) 준비 중...`);
 
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          const base64 = result.includes(',') ? result.split(',')[1] : result;
-          resolve(base64);
-        };
-        reader.onerror = (err) => reject(new Error('오디오 파일 스트림 읽기에 실패했습니다.'));
-        reader.readAsDataURL(file);
-      });
+      let audioChunks: AudioChunkPayload[] = [];
+      let isChunkedAudio = false;
+      let totalAudioDuration = 0;
 
-      // Stage 2: In-flight AI processing simulation timer (Progress: 35% -> 85%)
-      setAudioProgress(40);
-      setAudioStageIndex(2);
-      setTranscribingStatus(`🎙️ Gemini AI 모델이 음성을 듣고 사회복지사/어르신 화자를 분리하여 한국어로 텍스트 변환(STT) 중입니다...`);
-
-      // Dynamic progress ticker while server is processing
-      audioProgressTimerRef.current = setInterval(() => {
-        setAudioProgress((prev) => {
-          if (prev < 80) return prev + Math.floor(Math.random() * 4 + 2);
-          if (prev < 90) return prev + 1;
-          return prev;
+      try {
+        // Prepare optimized chunks (< 15MB each, ~6 min slices)
+        const chunkResult = await prepareOptimizedAudioChunks(file, {
+          chunkDurationSec: 360, // 6 minutes per chunk to guarantee safety under 15MB
+          onProgress: (statusMsg, pct) => {
+            setTranscribingStatus(statusMsg);
+            setAudioProgress(pct);
+          },
         });
-      }, 400);
+        audioChunks = chunkResult.chunks;
+        isChunkedAudio = chunkResult.isChunked;
+        totalAudioDuration = chunkResult.totalDurationSec;
 
-      // Call server STT endpoint
-      const response = await fetch('/api/ai/transcribe-audio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortController.signal,
-        body: JSON.stringify({
-          audioBase64: base64Data,
-          mimeType: validation.normalizedMime,
-          fileName: file.name,
-        }),
-      });
+        setAudioFileMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                durationSec: totalAudioDuration,
+                durationFormatted: formatDurationKorean(totalAudioDuration),
+                totalChunks: chunkResult.chunks.length,
+                status: 'processing',
+                statusText: chunkResult.isChunked
+                  ? `총 ${chunkResult.chunks.length}개 구간 분할 완료 (순차 AI STT 변환 중)`
+                  : '단일 구간 고음질 변환 중',
+              }
+            : null
+        );
+      } catch (chunkErr: any) {
+        console.warn('Audio chunking / Web Audio decoding fallback:', chunkErr);
+        // Fallback: direct file base64 read for files that could not be decoded in browser
+        setTranscribingStatus(`오디오 데이터를 Base64 규격으로 직접 인코딩 중...`);
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.includes(',') ? result.split(',')[1] : result;
+            resolve(base64.trim());
+          };
+          reader.onerror = () => reject(new Error('오디오 파일 스트림 읽기에 실패했습니다.'));
+          reader.readAsDataURL(file);
+        });
 
-      const data = await response.json();
+        audioChunks = [
+          {
+            chunkIndex: 0,
+            totalChunks: 1,
+            startSec: 0,
+            endSec: 0,
+            durationSec: 0,
+            base64: base64Data,
+            mimeType: validation.normalizedMime,
+            sizeMB: Number(sizeMB),
+            timeRangeLabel: '전체',
+          },
+        ];
+        isChunkedAudio = false;
+      }
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '음성 텍스트 변환(STT)에 실패했습니다. 다시 시도해 주세요.');
+      // Stage 2: AI STT Transcription (supports sequential chunk processing)
+      setAudioStageIndex(2);
+      const totalChunks = audioChunks.length;
+      const chunkTranscripts: string[] = [];
+
+      for (let i = 0; i < totalChunks; i++) {
+        if (abortController.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
+        const currentChunk = audioChunks[i];
+        const progressBase = 35 + Math.round((i / totalChunks) * 55);
+        setAudioProgress(progressBase);
+
+        if (totalChunks > 1) {
+          setTranscribingStatus(
+            `🎙️ [${i + 1}/${totalChunks} 구간 변환 중: ${currentChunk.timeRangeLabel}] Gemini AI 음성 인식 및 화자 분리 진행 중...`
+          );
+        } else {
+          setTranscribingStatus(
+            `🎙️ Gemini AI 모델이 음성을 듣고 사회복지사/어르신 화자를 분리하여 한국어로 텍스트 변환(STT) 중입니다...`
+          );
+        }
+
+        // Call server STT endpoint with safety headers
+        const response = await fetch('/api/ai/transcribe-audio', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          signal: abortController.signal,
+          body: JSON.stringify({
+            audioBase64: currentChunk.base64,
+            mimeType: currentChunk.mimeType,
+            fileName: file.name,
+            chunkIndex: currentChunk.chunkIndex,
+            totalChunks: currentChunk.totalChunks,
+            timeRangeLabel: currentChunk.timeRangeLabel,
+          }),
+        });
+
+        // Robust response parsing: reads text first to prevent JSON syntax crash on upstream/HTML error
+        const responseText = await response.text();
+        let data: any = null;
+
+        try {
+          data = JSON.parse(responseText);
+        } catch (jsonParseErr) {
+          console.error('Server returned non-JSON response:', responseText.slice(0, 300));
+          if (
+            responseText.includes('upstream') ||
+            response.status === 504 ||
+            response.status === 502
+          ) {
+            throw new Error(
+              `AI 서버 또는 게이트웨이 응답 지연 (Timeout): 음성 처리 시간이 길어졌습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.`
+            );
+          } else if (response.status === 413 || responseText.includes('too large')) {
+            throw new Error(
+              `전송 데이터 용량 초과 (${currentChunk.sizeMB}MB): 분할 구간 데이터가 서버 허용 한도를 초과했습니다.`
+            );
+          } else {
+            throw new Error(
+              `서버 응답 오류 (${response.status} ${response.statusText}): ${responseText.slice(0, 120)}`
+            );
+          }
+        }
+
+        if (!response.ok || !data.success) {
+          throw new Error(data?.error || `음성 변환 실패 (${i + 1}/${totalChunks} 구간). 다시 시도해 주세요.`);
+        }
+
+        const chunkText = data.transcript || '';
+        if (chunkText.trim()) {
+          chunkTranscripts.push(
+            totalChunks > 1 ? `[${currentChunk.timeRangeLabel} 구간]\n${chunkText.trim()}` : chunkText.trim()
+          );
+        }
       }
 
       // Stage 3: Formatting, Automated Cleanup & Applying Transcript (Progress: 90% -> 100%)
@@ -698,7 +855,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setAudioStageIndex(3);
       setTranscribingStatus(`한국어 대화록 자동 정제 및 실시간 인사이트 동기화 중...`);
 
-      const rawTranscribedText = data.transcript || '';
+      const rawTranscribedText = chunkTranscripts.join('\n\n');
       if (!rawTranscribedText.trim()) {
         throw new Error('음성 파일에서 감지된 발화 내용이 없습니다. 음성이 명확한 녹음 파일인지 확인해 주세요.');
       }
@@ -740,8 +897,17 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
 
       setShowRealtimeSummary(true);
       setAudioProgress(100);
+      setAudioFileMeta((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'completed',
+              statusText: 'AI STT 변환 완료 (대화록 생성 및 인사이트 동기화됨)',
+            }
+          : null
+      );
       setUploadSuccessBanner(
-        `🎙️ '${file.name}' STT 변환 완료! 대화록 정제 및 실시간 인사이트(Live Insights)가 대시보드에 즉시 자동 연동되었습니다.`
+        `🎙️ '${file.name}' (${totalChunks > 1 ? `총 ${totalChunks}개 구간 분할 완료` : '전체'}) STT 변환 완료! 대화록 및 실시간 인사이트가 대시보드에 즉시 동기화되었습니다.`
       );
       setTimeout(() => setUploadSuccessBanner(null), 6000);
 
@@ -756,11 +922,29 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       if (err.name === 'AbortError') {
         console.log('Audio transcription aborted by user.');
         setUploadSuccessBanner('음성 파일 변환 작업이 취소되었습니다.');
+        setAudioFileMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'ready',
+                statusText: '변환 작업이 취소되었습니다.',
+              }
+            : null
+        );
         setTimeout(() => setUploadSuccessBanner(null), 3000);
         return;
       }
 
       console.error('Audio transcription error:', err);
+      setAudioFileMeta((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'error',
+              statusText: '변환 중 오류가 발생했습니다.',
+            }
+          : null
+      );
       let errorMsg = err.message || '음성 파일 변환 중 오류가 발생했습니다.';
       try {
         const parsed = JSON.parse(errorMsg);
@@ -969,9 +1153,19 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       clearInterval(progressInterval);
       setAnalysisProgress(100);
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        if (responseText.includes('upstream') || response.status === 504 || response.status === 502) {
+          throw new Error('AI 분석 서버 응답 지연 (Timeout): 상담 데이터 분석에 시간이 더 소요되었습니다. 아래 비상 규칙 사정 생성을 이용하거나 잠시 후 다시 시도해 주세요.');
+        }
+        throw new Error(`AI 서버 응답 오류 (${response.status}): ${responseText.slice(0, 100)}`);
+      }
+
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'AI 서식 분석 요청에 실패했습니다.');
+        throw new Error(data?.error || 'AI 서식 분석 요청에 실패했습니다.');
       }
 
       setAnalysisResult(data.result);
@@ -1939,25 +2133,25 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   <span className="hidden sm:inline">단축키</span>
                 </button>
 
-                {/* File Upload Button (Audio & Text) */}
+                {/* File Upload Button (Audio & Text) - Up to 300MB / 1-hour audio support */}
                 <label
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs border ${
                     isTranscribingAudio
                       ? 'bg-amber-100 text-amber-900 border-amber-400 animate-pulse'
                       : 'bg-stone-100 dark:bg-stone-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-stone-700 dark:text-stone-200 border-stone-300 dark:border-stone-700 hover:border-amber-400'
                   }`}
-                  title="음성 녹음 파일(MP3, WAV, M4A 등) 또는 텍스트 문서(TXT, VTT, DOCX 등)를 업로드하여 AI 자동 변환합니다."
+                  title="1시간 분량(최대 300MB) 음성 녹음 파일(MP3, WAV, M4A, AAC, OGG 등) 또는 텍스트 문서(TXT, VTT, DOCX 등)를 업로드하여 AI 자동 변환합니다."
                 >
                   {isTranscribingAudio ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
-                      <span>음성 STT 변환 중...</span>
+                      <span>대용량 음성 STT 변환 중...</span>
                     </>
                   ) : (
                     <>
                       <FileAudio className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                      <span className="hidden sm:inline">음성/문서 파일 첨부 (STT)</span>
-                      <span className="sm:hidden">파일첨부</span>
+                      <span className="hidden sm:inline">음성/문서 파일 첨부 (최대 300MB, 1시간)</span>
+                      <span className="sm:hidden">파일첨부(300MB)</span>
                     </>
                   )}
                   <input
@@ -2044,169 +2238,335 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
               </div>
             )}
 
-            {/* Real-time Audio STT Processing & Progress Bar Indicator */}
-            {isTranscribingAudio && (
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-amber-600/15 border-2 border-amber-400 dark:border-amber-600/80 shadow-md space-y-4 animate-in fade-in duration-200">
-                {/* Header: Status, Percentage, Elapsed Timer & Cancel Button */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
-                      <Activity className="w-4 h-4 animate-pulse" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs sm:text-sm font-bold text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
-                        <span>Gemini AI 고정밀 음성 인식(STT) 진행 중</span>
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
-                          {audioProgress}%
-                        </span>
-                      </h4>
-                      <p className="text-[11px] text-amber-800 dark:text-amber-300 line-clamp-1">
-                        {transcribingStatus || '음성을 분석하여 발화자(사회복지사/어르신)별 대화록으로 변환하고 있습니다...'}
-                      </p>
-                    </div>
+            {/* 🎙️ Dedicated Large Audio File Upload & STT Analysis Center */}
+            <div className="rounded-2xl border border-stone-200/90 dark:border-stone-800 bg-white/70 dark:bg-[#1E1916]/80 p-4 sm:p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                    <UploadCloud className="w-5 h-5" />
                   </div>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/80 dark:bg-stone-900/80 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 font-mono font-bold">
-                      <Clock className="w-3.5 h-3.5 text-amber-600 animate-spin" />
-                      <span>{Math.floor(audioElapsedSeconds / 60).toString().padStart(2, '0')}:{(audioElapsedSeconds % 60).toString().padStart(2, '0')}</span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={cancelAudioTranscription}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-950/60 text-stone-600 dark:text-stone-300 text-xs font-semibold border border-stone-300 dark:border-stone-700 transition-colors cursor-pointer"
-                      title="진행 중인 음성 변환 취소"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                      <span>취소</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Animated Progress Bar */}
-                <div className="space-y-1.5">
-                  <div className="w-full h-3 bg-amber-100 dark:bg-stone-800 rounded-full overflow-hidden p-0.5 border border-amber-300/80 dark:border-amber-700/60 shadow-inner">
-                    <div
-                      className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-full transition-all duration-300 ease-out relative overflow-hidden"
-                      style={{ width: `${Math.max(audioProgress, 5)}%` }}
-                    >
-                      <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.25)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.25)_50%,rgba(255,255,255,0.25)_75%,transparent_75%,transparent)] bg-[length:1rem_1rem] animate-[progress_1s_linear_infinite]" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 4-Stage Progress Breadcrumbs */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                  {AUDIO_STT_STAGES.map((stage, idx) => {
-                    const isCompleted = audioStageIndex > idx;
-                    const isCurrent = audioStageIndex === idx;
-                    return (
-                      <div
-                        key={idx}
-                        className={`p-2 rounded-xl text-left transition-all border ${
-                          isCompleted
-                            ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
-                            : isCurrent
-                            ? 'bg-white dark:bg-stone-900 border-amber-400 dark:border-amber-600 text-amber-950 dark:text-amber-100 ring-2 ring-amber-400/30 shadow-xs'
-                            : 'bg-stone-50/50 dark:bg-stone-900/30 border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-600'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          {isCompleted ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          ) : isCurrent ? (
-                            <RefreshCw className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 animate-spin shrink-0" />
-                          ) : (
-                            <span className="w-3.5 h-3.5 rounded-full border border-stone-300 dark:border-stone-700 flex items-center justify-center text-[9px] font-mono shrink-0">
-                              {idx + 1}
-                            </span>
-                          )}
-                          <span className="text-[11px] font-bold truncate">{stage.label}</span>
-                        </div>
-                        <p className="text-[10px] text-stone-500 dark:text-stone-400 line-clamp-1">
-                          {stage.desc}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Uploaded File Info Footnote */}
-                {audioFileMeta && (
-                  <div className="flex flex-wrap items-center justify-between text-[11px] text-amber-900 dark:text-amber-300 pt-2 border-t border-amber-200/80 dark:border-amber-800/60">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">📁 파일: {audioFileMeta.name}</span>
-                      <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-[10px] font-bold">
-                        {audioFileMeta.format} ({audioFileMeta.sizeMB}MB)
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                      <span>대용량 상담 녹취 파일 업로드 & AI 분석 센터</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                        최대 300MB • 1시간+ 분량 지원
                       </span>
-                    </div>
-                    <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                      💡 시스템이 정상 작동 중입니다. 오디오 크기에 따라 3~10초 소요됩니다.
-                    </span>
+                    </h4>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                      스마트 오디오 리샘플링(16kHz 모노) 및 구간 분할(Chunking)을 통해 끊김 없이 고정밀 STT 분석을 수행합니다.
+                    </p>
                   </div>
+                </div>
+
+                {!audioFileMeta && !isTranscribingAudio && (
+                  <label
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs cursor-pointer transition-all active:scale-[0.98]"
+                    title="오디오 파일(MP3, WAV, M4A 등)을 선택합니다."
+                  >
+                    <FileAudio className="w-3.5 h-3.5" />
+                    <span>녹취 파일 선택</span>
+                    <input
+                      type="file"
+                      accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,.flac,.wma,.txt,.vtt,.srt,.doc,.docx,.json,.csv,audio/*"
+                      className="hidden"
+                      disabled={isTranscribingAudio}
+                      onChange={handleFileUpload}
+                    />
+                  </label>
                 )}
               </div>
-            )}
 
-            {/* Upload Success Banner */}
-            {uploadSuccessBanner && (
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between gap-2 animate-in fade-in">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span className="font-medium">{uploadSuccessBanner}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setUploadSuccessBanner(null)}
-                  className="text-[10px] text-emerald-600 hover:underline cursor-pointer"
+              {/* Upload Dropzone (When no audio file is uploaded yet) */}
+              {!audioFileMeta && !isTranscribingAudio && (
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const files = e.dataTransfer.files;
+                    if (files && files[0]) {
+                      processAudioFile(files[0]);
+                    }
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+                    isDragOver
+                      ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/30 ring-4 ring-amber-400/20'
+                      : 'border-stone-300 dark:border-stone-700 hover:border-amber-400 dark:hover:border-amber-600 bg-stone-50/50 dark:bg-[#251F1C]/40 hover:bg-amber-50/20'
+                  }`}
                 >
-                  닫기
-                </button>
-              </div>
-            )}
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center justify-center shadow-xs">
+                      <UploadCloud className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-xs sm:text-sm font-bold text-stone-800 dark:text-stone-200">
+                        상담 녹음 파일을 여기로 드래그하거나 클릭하여 업로드하세요
+                      </p>
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                        지원 포맷: MP3, M4A, WAV, AAC, OGG, WebM (최대 300MB, 1시간 분량) 또는 회의록 텍스트(TXT)
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-[10px] text-stone-500 dark:text-stone-400 font-medium">
+                      <span className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
+                        ⚡ 16kHz 자동 리샘플링
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
+                        ✂️ 6분 단위 대용량 자동 분할
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
+                        🗣️ 복지사·어르신 화자 자동 분리
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-            {/* Uploaded Audio Playback Widget */}
-            {uploadedAudioUrl && (
-              <div className="p-3.5 rounded-xl bg-stone-100 dark:bg-[#2A2320] border border-stone-300 dark:border-stone-700 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 font-bold text-stone-800 dark:text-stone-200 truncate">
-                    <FileAudio className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span className="truncate">첨부 음성 재생: {uploadedAudioFileName || '녹음 파일'}</span>
+              {/* Uploaded File Metadata & Processing Status Card */}
+              {audioFileMeta && (
+                <div className="p-4 rounded-xl bg-stone-50/90 dark:bg-[#251F1C] border border-amber-300/80 dark:border-amber-800/80 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    {/* Left: File Name, Duration, and Size */}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="p-2 rounded-lg bg-amber-500 text-white shrink-0">
+                        <FileAudio className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-stone-900 dark:text-stone-100 truncate max-w-[220px] sm:max-w-xs">
+                            {audioFileMeta.name}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-[10px] font-mono font-bold">
+                            {audioFileMeta.format} • {audioFileMeta.sizeMB} MB
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                          <span className="flex items-center gap-1 font-semibold text-amber-800 dark:text-amber-300">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            <span>시간 길이: {audioFileMeta.durationFormatted || '시간 계산 중...'}</span>
+                          </span>
+                          {audioFileMeta.totalChunks && audioFileMeta.totalChunks > 1 && (
+                            <span className="text-[10px] text-stone-400">
+                              (총 {audioFileMeta.totalChunks}개 구간 분할)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Processing Status Badge & File Actions */}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                          isTranscribingAudio
+                            ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border-amber-400 animate-pulse ring-2 ring-amber-300/40'
+                            : audioFileMeta.status === 'completed'
+                            ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-200 border-emerald-400'
+                            : audioFileMeta.status === 'error'
+                            ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-900 dark:text-rose-200 border-rose-400'
+                            : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border-stone-300'
+                        }`}
+                      >
+                        {isTranscribingAudio ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                            <span>대용량 분석 진행 중</span>
+                          </>
+                        ) : audioFileMeta.status === 'completed' ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>STT 변환 완료</span>
+                          </>
+                        ) : audioFileMeta.status === 'error' ? (
+                          <>
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                            <span>변환 오류</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-stone-600" />
+                            <span>준비 완료</span>
+                          </>
+                        )}
+                      </span>
+
+                      {!isTranscribingAudio && (
+                        <label
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-700 cursor-pointer transition-colors"
+                          title="다른 오디오 파일로 변경하기"
+                        >
+                          <span>파일 변경</span>
+                          <input
+                            type="file"
+                            accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,.flac,.wma,.txt,.vtt,.srt,.doc,.docx,.json,.csv,audio/*"
+                            className="hidden"
+                            onChange={handleFileUpload}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Status Detailed Subtext */}
+                  <div className="text-[11px] text-stone-600 dark:text-stone-300 bg-white/60 dark:bg-[#1E1916]/60 p-2 rounded-lg border border-stone-200/80 dark:border-stone-800 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span className="font-semibold text-stone-700 dark:text-stone-200">처리 상태:</span>
+                      <span className="truncate">{audioFileMeta.statusText || '파일이 준비되었습니다.'}</span>
+                    </span>
+                    {isTranscribingAudio && (
+                      <span className="font-mono text-[10px] font-bold text-amber-800 dark:text-amber-300 shrink-0">
+                        {Math.floor(audioElapsedSeconds / 60).toString().padStart(2, '0')}:{(audioElapsedSeconds % 60).toString().padStart(2, '0')} 경과
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 📊 High-Visibility Large File Progress Bar */}
+                  {(isTranscribingAudio || audioProgress > 0) && (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                          <span>대용량 파일 분석 진행 상황</span>
+                          {transcribingStatus && (
+                            <span className="font-normal text-[11px] text-stone-500 dark:text-stone-400 truncate max-w-xs hidden sm:inline">
+                              - {transcribingStatus}
+                            </span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-amber-800 dark:text-amber-300 text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700">
+                            {audioProgress}%
+                          </span>
+                          {isTranscribingAudio && (
+                            <button
+                              type="button"
+                              onClick={cancelAudioTranscription}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-stone-100 dark:bg-stone-800 hover:bg-rose-100 hover:text-rose-700 text-stone-600 dark:text-stone-300 text-[11px] font-semibold border border-stone-300 dark:border-stone-700 transition-colors cursor-pointer"
+                              title="진행 중인 음성 변환 취소"
+                            >
+                              <X className="w-3 h-3" />
+                              <span>취소</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress Bar Track & Indicator */}
+                      <div className="w-full h-3.5 bg-stone-200 dark:bg-stone-800 rounded-full overflow-hidden p-0.5 border border-amber-300/80 dark:border-amber-700/60 shadow-inner">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-full transition-all duration-300 ease-out relative overflow-hidden"
+                          style={{ width: `${Math.max(audioProgress, 4)}%` }}
+                        >
+                          <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.25)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.25)_50%,rgba(255,255,255,0.25)_75%,transparent_75%,transparent)] bg-[length:1rem_1rem] animate-[progress_1s_linear_infinite]" />
+                        </div>
+                      </div>
+
+                      {/* 4-Stage Breadcrumbs for Large File Processing */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+                        {AUDIO_STT_STAGES.map((stage, idx) => {
+                          const isCompleted = audioStageIndex > idx || (!isTranscribingAudio && audioProgress === 100);
+                          const isCurrent = isTranscribingAudio && audioStageIndex === idx;
+                          return (
+                            <div
+                              key={idx}
+                              className={`p-2 rounded-xl text-left transition-all border ${
+                                isCompleted
+                                  ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+                                  : isCurrent
+                                  ? 'bg-white dark:bg-stone-900 border-amber-400 dark:border-amber-600 text-amber-950 dark:text-amber-100 ring-2 ring-amber-400/30 shadow-xs'
+                                  : 'bg-stone-50/50 dark:bg-stone-900/30 border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-600'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1 mb-0.5">
+                                {isCompleted ? (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                ) : isCurrent ? (
+                                  <RefreshCw className="w-3 h-3 text-amber-600 dark:text-amber-400 animate-spin shrink-0" />
+                                ) : (
+                                  <span className="w-3 h-3 rounded-full border border-stone-300 dark:border-stone-700 flex items-center justify-center text-[8px] font-mono shrink-0">
+                                    {idx + 1}
+                                  </span>
+                                )}
+                                <span className="text-[10px] font-bold truncate">{stage.label}</span>
+                              </div>
+                              <p className="text-[9px] text-stone-500 dark:text-stone-400 line-clamp-1">
+                                {stage.desc}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Uploaded Audio Playback Widget */}
+                  {uploadedAudioUrl && (
+                    <div className="pt-2 border-t border-stone-200 dark:border-stone-800 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
+                          <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                          <span>오디오 실시간 미리듣기:</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                            {audioFileMeta.durationFormatted || ''}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUploadedAudioUrl(null);
+                              setUploadedAudioFileName(null);
+                            }}
+                            className="text-[11px] text-stone-400 hover:text-rose-500 cursor-pointer"
+                          >
+                            플레이어 닫기
+                          </button>
+                        </div>
+                      </div>
+                      <audio
+                        src={uploadedAudioUrl}
+                        controls
+                        className="w-full h-8 rounded-lg focus:outline-none"
+                      />
+                      {recordedAudioBlob && !isTranscribingAudio && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={handleTranscribeRecordedAudio}
+                            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Gemini 고정밀 STT 변환</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Upload Success Banner */}
+              {uploadSuccessBanner && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="font-medium">{uploadSuccessBanner}</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setUploadedAudioUrl(null);
-                      setUploadedAudioFileName(null);
-                    }}
-                    className="text-[11px] text-stone-500 hover:text-rose-600 cursor-pointer"
+                    onClick={() => setUploadSuccessBanner(null)}
+                    className="text-[10px] text-emerald-600 hover:underline cursor-pointer"
                   >
-                    오디오 닫기
+                    닫기
                   </button>
                 </div>
-                <audio
-                  src={uploadedAudioUrl}
-                  controls
-                  className="w-full h-8 rounded-lg focus:outline-none"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <span className="text-[11px] text-stone-500 dark:text-stone-400">
-                    💡 재생 바에서 음성을 확인하거나 Gemini AI로 고정밀 녹취록 변환을 수행할 수 있습니다.
-                  </span>
-                  {recordedAudioBlob && !isTranscribingAudio && (
-                    <button
-                      type="button"
-                      onClick={handleTranscribeRecordedAudio}
-                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Gemini 고정밀 STT 변환</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Real-time Voice Recording Active Banner */}
             {isRecording && (
@@ -2266,7 +2626,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
 어르신: 말도 마요. 지난주 화장실 문턱에서 넘어져서 엉덩방아를 찧었어. 밥맛도 없어서 하루 한 끼 찬물에 말아 먹어...
 
 💡 파일 첨부 팁:
-- MP3, M4A, WAV 등 음성 파일을 이 곳에 드래그하거나 상단 '음성/문서 파일 첨부'를 클릭하면 Gemini AI가 고정밀 한국어 텍스트로 자동 변환(STT)합니다.
+- 약 1시간 분량(최대 300MB)의 대용량 음성 파일(MP3, M4A, WAV, AAC, OGG, WebM, FLAC 등)을 이곳에 드래그하거나 상단 버튼으로 첨부하면 Gemini AI가 고정밀 한국어 전문 녹취록으로 자동 변환(STT)합니다.
 - TXT, DOCX, CSV 등 텍스트 문서를 드래그하여 바로 불러올 수 있습니다.`}
                 className="w-full text-xs font-mono p-3.5 rounded-lg border border-stone-300 dark:border-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500 text-stone-800 dark:text-stone-100 bg-stone-50/60 dark:bg-[#251F1C] leading-relaxed resize-y"
               />
@@ -2275,7 +2635,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                 <div className="absolute inset-0 bg-amber-500/10 backdrop-blur-xs rounded-lg border-2 border-dashed border-amber-500 flex flex-col items-center justify-center pointer-events-none text-amber-900 dark:text-amber-200">
                   <Upload className="w-8 h-8 text-amber-600 animate-bounce mb-2" />
                   <span className="text-sm font-bold">음성 또는 텍스트 파일을 여기에 놓아주세요</span>
-                  <span className="text-xs text-amber-700 dark:text-amber-300">MP3, WAV, M4A, TXT 등 자동 인식 및 STT 변환</span>
+                  <span className="text-xs text-amber-700 dark:text-amber-300">최대 300MB(약 1시간 분량) MP3, WAV, M4A, TXT 등 자동 인식 및 STT 변환</span>
                 </div>
               )}
 
@@ -2530,6 +2890,51 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
               </div>
 
               <div className="p-5 space-y-4 max-h-[calc(100vh-220px)] overflow-y-auto">
+                {/* ⚡ Statutory Form One-Click Auto-Fill Card (상담 내용 & 상담 목적 법정 서식 자동 채우기) */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-600/15 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 border-2 border-amber-400 dark:border-amber-600/70 shadow-sm space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5">
+                      <div className="p-2 rounded-xl bg-amber-600 text-white shadow-xs shrink-0 mt-0.5">
+                        <Sparkles className="w-4 h-4 text-amber-200" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-bold text-amber-950 dark:text-amber-100 flex items-center gap-1.5 flex-wrap">
+                          <span>법정 서식 원클릭 자동 완성</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                            상담 목적·내용 자동 매핑
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-amber-900/80 dark:text-amber-200/80 mt-0.5 leading-relaxed">
+                          AI가 분석한 상담 요약, 위기도, 주요 호소 및 권고 사항을 법정 서식(재가노인지원서비스 상담기록지 등)의 필수 필드에 버튼 한 번으로 채워 넣습니다.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <button
+                      id="btn-autofill-legal-form-direct"
+                      type="button"
+                      onClick={() => handleExecuteAutoFillLegalForm('monitoring')}
+                      className="py-2.5 px-3 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ring-2 ring-amber-400/40 active:scale-[0.98]"
+                      title="상담기록지(모니터링)의 상담 목적과 내용 필드에 AI 분석 결과를 즉시 채우고 편집기를 엽니다."
+                    >
+                      <Zap className="w-4 h-4 text-amber-200" />
+                      <span>⚡ 상담기록지 서식 자동 완성</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAutoFillModalOpen(true)}
+                      className="py-2.5 px-3 rounded-xl font-semibold text-xs text-amber-950 dark:text-amber-200 bg-white/90 dark:bg-stone-900/90 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-300 dark:border-amber-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                      title="매핑 미리보기 및 다른 법정 서식(초기면접지, 사례사정서 등) 선택"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+                      <span>서식 선택 및 매핑 미리보기</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Manual Correction Mode Info Banner */}
                 {isEditingAnalysis && (
                   <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 rounded-xl text-xs space-y-1 text-amber-900 dark:text-amber-200">
@@ -2961,14 +3366,25 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                 {/* Analysis Result Immediate Linkage & Wizard Actions */}
                 <div className="pt-2 space-y-2">
                   <button
+                    id="btn-autofill-legal-form-action"
+                    type="button"
+                    onClick={() => handleExecuteAutoFillLegalForm('monitoring')}
+                    className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 hover:from-amber-500 hover:to-orange-500 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ring-2 ring-amber-400/50 active:scale-[0.99]"
+                    title="상담 목적과 상담 내용을 법정 서식(상담기록지)에 원클릭으로 자동 채우고 서식 편집기로 이동합니다."
+                  >
+                    <Zap className="w-4 h-4 text-amber-200" />
+                    <span>⚡ 법정 서식 원클릭 자동 완성 (상담 내용·목적 자동 매핑)</span>
+                  </button>
+
+                  <button
                     id="btn-immediate-form-link"
                     type="button"
                     onClick={handleApplyToForm}
-                    className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ring-2 ring-emerald-400/50 active:scale-[0.99]"
+                    className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ring-1 ring-emerald-400/40 active:scale-[0.99]"
                     title="추출된 상담 분석 내용을 10대 표준 서식에 자동 매핑하여 서식 편집기 초안으로 즉시 이동합니다."
                   >
                     <ArrowRight className="w-4 h-4 text-emerald-100" />
-                    <span>⚡ 분석 결과 즉시 연동 ({DOCUMENT_TYPE_LABELS[documentType].short} 초안 바로가기)</span>
+                    <span>분석 결과 전체 연동 ({DOCUMENT_TYPE_LABELS[documentType].short} 초안 열기)</span>
                   </button>
 
                   <button
@@ -3023,7 +3439,161 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         </div>
       </div>
       )}
-      {/* Shortcut Toast Notification */}
+      {/* Statutory Form Auto-Fill Preview & Selection Modal */}
+      {isAutoFillModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#1E1916] rounded-2xl max-w-xl w-full border border-stone-300 dark:border-stone-700 shadow-2xl overflow-hidden animate-fade-in flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 bg-gradient-to-r from-amber-700 via-orange-700 to-amber-800 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-200" />
+                <div>
+                  <h3 className="text-sm font-bold">법정 서식 원클릭 자동 완성 미리보기</h3>
+                  <p className="text-[11px] text-amber-100">
+                    상담 분석 결과가 법정 서식의 '상담 목적'과 '상담 내용' 필드에 자동으로 매핑됩니다.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAutoFillModalOpen(false)}
+                className="p-1 rounded-lg text-amber-200 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
+              {/* Target Legal Form Selector */}
+              <div>
+                <label className="block font-bold text-stone-800 dark:text-stone-200 mb-1.5 flex items-center gap-1">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                  <span>자동 완성 대상 법정 서식 선택</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { type: 'monitoring' as DocumentType, label: '상담 및 모니터링 기록지', badge: '가장 권장' },
+                    { type: 'intake' as DocumentType, label: '초기상담 및 면접 기록지', badge: '신규 접수' },
+                    { type: 'assessment' as DocumentType, label: '사례사정서 (종합사정표)', badge: '욕구 사정' },
+                    { type: 'service_plan' as DocumentType, label: '서비스 제공 계획서', badge: 'ISP 연계' },
+                  ].map((item) => (
+                    <button
+                      key={item.type}
+                      type="button"
+                      onClick={() => setAutoFillTargetDocType(item.type)}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        autoFillTargetDocType === item.type
+                          ? 'border-amber-500 bg-amber-50/80 dark:bg-amber-950/40 text-amber-950 dark:text-amber-100 ring-2 ring-amber-400/40 font-bold'
+                          : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="truncate">{item.label}</span>
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 font-normal">
+                          {item.badge}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mapped Fields Preview */}
+              <div className="space-y-3 pt-1">
+                <div className="font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5 text-amber-600" />
+                  <span>서식 필드 자동 매핑 미리보기</span>
+                </div>
+
+                {/* 1. Counseling Purpose */}
+                <div className="p-3 rounded-xl bg-stone-50 dark:bg-[#251F1C] border border-stone-200 dark:border-stone-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                    <span>📌 [상담 목적] 필드에 채워질 내용:</span>
+                    <span className="text-[10px] text-stone-500">counselingPurpose</span>
+                  </div>
+                  <p className="text-[11px] text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-900 p-2 rounded-lg border border-stone-200/80 dark:border-stone-800 leading-relaxed font-sans">
+                    {analysisResult?.threeLineSummary[0] || '어르신 생활 및 건강 상태 정기 모니터링, 주요 욕구 및 위험 요인 파악'}
+                  </p>
+                </div>
+
+                {/* 2. Counseling Content */}
+                <div className="p-3 rounded-xl bg-stone-50 dark:bg-[#251F1C] border border-stone-200 dark:border-stone-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                    <span>📝 [상담 내용] 필드에 채워질 내용:</span>
+                    <span className="text-[10px] text-stone-500">counselingContent</span>
+                  </div>
+                  <div className="text-[11px] text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-900 p-2 rounded-lg border border-stone-200/80 dark:border-stone-800 leading-relaxed max-h-48 overflow-y-auto space-y-1.5 font-sans whitespace-pre-line">
+                    {analysisResult ? (
+                      <>
+                        <div className="font-semibold text-amber-900 dark:text-amber-200">
+                          [1. 상담 요약 및 어르신 호소]
+                        </div>
+                        <div>{analysisResult.threeLineSummary.join('\n')}</div>
+
+                        <div className="font-semibold text-amber-900 dark:text-amber-200 pt-1">
+                          [2. 발화 핵심 이슈 및 사정 결과]
+                        </div>
+                        <div>• 위기도: {analysisResult.riskLevel}</div>
+                        <div>• 주요 이슈: {analysisResult.keyIssues.join(', ')}</div>
+
+                        <div className="font-semibold text-amber-900 dark:text-amber-200 pt-1">
+                          [3. 사회복지사 의견 및 추천 조치]
+                        </div>
+                        <div>{analysisResult.recommendedService}</div>
+                      </>
+                    ) : (
+                      transcriptText.slice(0, 300) || '상담 대화 내용'
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Next Action Plan */}
+                <div className="p-2.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 text-[11px] text-stone-700 dark:text-stone-300 flex items-center justify-between">
+                  <span className="font-semibold text-amber-900 dark:text-amber-200">
+                    💡 사후 계획 및 상담 구분도 함께 자동 입력됩니다.
+                  </span>
+                  <span className="text-[10px] text-amber-800 dark:text-amber-300 font-bold">
+                    방문상담 • 위기도별 차기 일정
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-stone-50 dark:bg-[#1A1513] border-t border-stone-200 dark:border-stone-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIsAutoFillModalOpen(false)}
+                className="px-3 py-2 rounded-xl text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-800 text-xs font-semibold cursor-pointer"
+              >
+                닫기
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteAutoFillLegalForm(autoFillTargetDocType)}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer ring-2 ring-amber-400/40"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-200" />
+                <span>선택한 서식에 자동 채우기 및 열기</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Fill Toast Notification */}
+      {autoFillToast && (
+        <div className="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-gradient-to-r from-amber-800 via-orange-800 to-stone-900 text-white text-xs font-bold shadow-2xl border border-amber-400/60 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5 backdrop-blur-xs max-w-md">
+          <Sparkles className="w-5 h-5 text-amber-300 shrink-0 animate-bounce" />
+          <span className="flex-1 leading-relaxed">{autoFillToast}</span>
+          <button
+            type="button"
+            onClick={() => setAutoFillToast(null)}
+            className="p-1 rounded-md text-stone-300 hover:text-white cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {shortcutToast && (
         <div className="fixed top-20 right-6 z-50 bg-stone-900/95 dark:bg-stone-800 text-white text-xs px-4 py-2.5 rounded-xl shadow-xl border border-amber-500/50 flex items-center gap-2 animate-slide-in backdrop-blur-xs">
           <Keyboard className="w-4 h-4 text-amber-400 shrink-0" />

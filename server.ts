@@ -9,9 +9,9 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-// Enable large body size for audio uploads (up to 50MB base64)
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+// Enable large body size for audio uploads (up to 500MB to support ~1 hour audio recordings)
+app.use(express.json({ limit: "500mb" }));
+app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
 // Server-side Gemini initialization with telemetry header
 const ai = new GoogleGenAI({
@@ -46,9 +46,7 @@ async function callGeminiWithFallback(
         });
 
         const text = response.text || "";
-        if (text) {
-          return { text, modelUsed: model };
-        }
+        return { text: text.trim(), modelUsed: model };
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
@@ -319,8 +317,18 @@ function normalizeAudioMimeType(rawMimeType?: string, fileName?: string): { mime
  */
 app.post("/api/ai/transcribe-audio", async (req, res) => {
   const requestStartTime = Date.now();
+  // Ensure response is always application/json
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
   try {
-    const { audioBase64, mimeType, fileName } = req.body;
+    const {
+      audioBase64,
+      mimeType,
+      fileName,
+      chunkIndex,
+      totalChunks,
+      timeRangeLabel,
+    } = req.body;
 
     // 1. Audio Data Presence Validation
     if (!audioBase64 || typeof audioBase64 !== "string" || audioBase64.trim().length === 0) {
@@ -357,26 +365,38 @@ app.post("/api/ai/transcribe-audio", async (req, res) => {
     const sizeInKB = Math.round(audioBuffer.length / 1024);
     const sizeInMB = (audioBuffer.length / (1024 * 1024)).toFixed(2);
 
-    // Check size threshold (Gemini inline audio max ~20MB-30MB)
-    if (audioBuffer.length > 30 * 1024 * 1024) {
-      console.warn(`[Audio STT Warning] Large audio file detected: ${sizeInMB}MB`);
+    // Check size threshold
+    if (audioBuffer.length > 50 * 1024 * 1024) {
+      console.warn(`[Audio STT Warning] Audio chunk/file exceeds 50MB: ${sizeInMB}MB`);
       return res.status(413).json({
         success: false,
-        error: `오디오 파일 크기가 너무 큽니다 (${sizeInMB}MB). 25MB 이하의 음성 파일을 권장합니다.`,
+        error: `오디오 데이터 크기가 한도를 초과하였습니다 (${sizeInMB}MB). 자동 분할 처리된 음성을 이용해 주세요.`,
       });
     }
 
     // 4. Validate & Normalize MIME Type for Gemini compatibility
     const { mimeType: normalizedMime, isSupported, detectedFormat } = normalizeAudioMimeType(mimeType, fileName);
 
+    const isSegment = typeof chunkIndex === "number" && typeof totalChunks === "number" && totalChunks > 1;
+
     console.log(`[Audio STT] 📥 Incoming request:
-  - File Name: ${fileName || "unnamed_audio"}
+  - File Name: ${fileName || "unnamed_audio"} ${isSegment ? `[구간 ${chunkIndex + 1}/${totalChunks} (${timeRangeLabel})]` : ""}
   - Detected Format: ${detectedFormat}
   - Raw MIME: ${mimeType || "none"} -> Normalized MIME: ${normalizedMime} (Supported: ${isSupported})
   - Buffer Size: ${sizeInKB} KB (${sizeInMB} MB)
   - Base64 Length: ${cleanBase64.length.toLocaleString()} chars`);
 
-    const promptText = `당신은 대한민국 최고 수준의 한국어 음성 인식(STT) 및 노인복지 상담 기록 전문 AI입니다.
+    const promptText = isSegment
+      ? `당신은 대한민국 최고 수준의 한국어 음성 인식(STT) 및 노인복지 상담 기록 전문 AI입니다.
+첨부된 파일은 약 1시간 분량의 노인복지 상담/가정방문 음성 중 [제 ${chunkIndex + 1}/${totalChunks} 구간 (${timeRangeLabel || ""})]의 음성입니다.
+이 구간의 대화를 주의 깊게 듣고 한국어로 정확하게 전문 녹취록(Transcript)으로 변환해 주세요.
+
+작성 규칙:
+1. 발화자 구분이 가능한 경우 [사회복지사], [어르신], [보호자], [상담원] 등으로 화자를 명확히 구분하여 줄바꿈으로 기록하십시오.
+2. 어르신의 사투리, 구어체 발화, 감정적 표현, 건강/통증 호소, 식사/복약 언급을 왜곡 없이 충실하게 받아적으십시오.
+3. 잡음이나 불명확한 부분은 문맥을 통해 가장 자연스러운 한국어 어휘로 복원하십시오.
+4. 부가적인 서두 인사나 마크다운 설명 없이, 실제 대화 녹취 텍스트 본문만 깔끔하게 출력하십시오.`
+      : `당신은 대한민국 최고 수준의 한국어 음성 인식(STT) 및 노인복지 상담 기록 전문 AI입니다.
 첨부된 노인복지 상담 또는 어르신 가정방문 음성 녹음 파일을 듣고, 한국어로 정확하게 전문 녹취록(Transcript)으로 변환해 주세요.
 
 작성 규칙:
@@ -385,27 +405,27 @@ app.post("/api/ai/transcribe-audio", async (req, res) => {
 3. 잡음이나 불명확한 부분은 문맥을 통해 가장 자연스러운 한국어 어휘로 복원하십시오.
 4. 부가적인 서두 인사나 마크다운 설명(예: '다음은 녹취록입니다') 없이, 실제 대화 녹취 텍스트 본문만 깔끔하게 출력하십시오.`;
 
-    const contents = [
-      {
-        inlineData: {
-          mimeType: normalizedMime,
-          data: cleanBase64,
+    const audioPart = {
+      inlineData: {
+        mimeType: normalizedMime,
+        data: cleanBase64,
+      },
+    };
+
+    const contents = {
+      parts: [
+        audioPart,
+        {
+          text: promptText,
         },
-      },
-      {
-        text: promptText,
-      },
-    ];
+      ],
+    };
 
     // Priority model fallback chain for audio transcription:
-    // 1) gemini-3.5-transcribe (specialized for audio)
-    // 2) gemini-3.7-flash (latest multimodal)
-    // 3) gemini-2.5-flash (fast multimodal)
-    // 4) gemini-flash-latest
+    // 1) gemini-3.5-transcribe (specialized for audio STT)
+    // 2) gemini-flash-latest (multimodal fallback)
     const modelsToTry = [
       "gemini-3.5-transcribe",
-      "gemini-3.7-flash",
-      "gemini-2.5-flash",
       "gemini-flash-latest",
     ];
 
@@ -428,6 +448,9 @@ app.post("/api/ai/transcribe-audio", async (req, res) => {
       success: true,
       transcript: resultText.trim(),
       fileName: fileName || "음성 녹음 파일",
+      chunkIndex,
+      totalChunks,
+      timeRangeLabel,
       detectedFormat,
       mimeTypeUsed: normalizedMime,
       modelUsed: usedModel,

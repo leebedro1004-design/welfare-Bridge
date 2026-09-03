@@ -45,8 +45,8 @@ export const SUPPORTED_AUDIO_MIME_TYPES = [
   'audio/x-ms-wma',
 ] as const;
 
-export const MAX_AUDIO_FILE_SIZE_BYTES = 30 * 1024 * 1024; // 30MB
-export const RECOMMENDED_AUDIO_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
+export const MAX_AUDIO_FILE_SIZE_BYTES = 300 * 1024 * 1024; // 300MB (약 1시간~2시간 분량의 고음질 녹음 파일 수용)
+export const RECOMMENDED_AUDIO_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
 
 /**
  * Validates an audio file before initiation of the upload process.
@@ -130,7 +130,7 @@ export function validateAudioFile(file: File): AudioValidationResult {
     };
   }
 
-  // Max file size check
+  // Max file size check (Supports up to 300MB for 1-hour audio recordings)
   if (sizeBytes > MAX_AUDIO_FILE_SIZE_BYTES) {
     return {
       isValid: false,
@@ -138,8 +138,8 @@ export function validateAudioFile(file: File): AudioValidationResult {
       normalizedMime,
       sizeMB,
       sizeFormatted,
-      errorMessage: `파일 용량(${sizeFormatted})이 허용 한도(30MB)를 초과하였습니다.`,
-      suggestion: '파일 크기를 25MB 이하로 압축하거나 상담 녹음을 분할하여 업로드해 주세요.',
+      errorMessage: `파일 용량(${sizeFormatted})이 대용량 허용 한도(300MB, 약 1시간~2시간 분량)를 초과하였습니다.`,
+      suggestion: '파일 크기를 300MB 이하로 압축하거나 1시간 단위로 분할하여 업로드해 주세요.',
     };
   }
 

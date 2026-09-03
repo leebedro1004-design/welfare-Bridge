@@ -322,11 +322,17 @@ export interface CaseDocument {
     hasAgreedToPrivacyCollection?: boolean;
     hasAgreedToPrivacyThirdParty?: boolean;
 
-    // 7. 모니터링 기록지
+    // 7. 모니터링 및 상담 기록지
     monitoringDate?: string;
     monitoringNumber?: string;
     monitoringType?: '최초' | '정기';
     monitoringMethod?: '방문' | '유선' | '내방';
+    counselingPurpose?: string; // 상담 목적 (AI 서식 자동 완성 매핑 대상 필드)
+    counselingContent?: string; // 상담 내용 (AI 서식 자동 완성 매핑 대상 필드)
+    counselingCategory?: string; // 상담 구분 (정기상담 / 초기상담 / 위기상담 등)
+    counselingNextPlan?: string; // 상담 후 조치 계획
+    aiAutoFilledFields?: string[]; // AI 서식 자동 완성으로 채워진 필드 목록
+    aiAutoFilledTimestamp?: string; // 자동 완성 일시
     monitoringSatisfactionScores?: {
       halfYearSatisfaction?: string;
       scheduleAdherence?: string;
