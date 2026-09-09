@@ -47,17 +47,22 @@ import {
   MicOff,
   Shrink,
   Edit3,
-  CheckCheck
+  CheckCheck,
+  Zap,
 } from 'lucide-react';
-import { CaseDocument, ClientProfile, DocumentType, UserSettings } from '../types';
+import { CaseDocument, ClientProfile, ConsultationInsight, DocumentType, UserSettings } from '../types';
 import { DOCUMENT_TYPE_LABELS, ORDERED_DOC_TYPES, createEmptyDocument } from '../utils/documentTemplates';
+import { resolveDocumentAuthor, getEffectiveAgencyName, getEffectiveWorkerName } from '../utils/userSettingsHelper';
 import { ConditionPresetId, CONDITION_PRESETS } from '../data/conditionPresets';
 import { DocumentAuditModal } from './DocumentAuditModal';
 import { OfficialPrintExportModal } from './OfficialPrintExportModal';
 import { AIHumanCollaborationMode } from './AIHumanCollaborationMode';
 import { InlineAICollaborationField, CollaborationTopBanner } from './AICollaborationInlineControls';
+import { getContextualFieldAlternatives, getFieldEvidenceQuote } from '../utils/aiAlternativesHelper';
 import { CaseLifecycleProgressBar } from './CaseLifecycleProgressBar';
 import { focusSoundService, SoundType } from '../utils/focusSoundService';
+import { QuickFillModal } from './QuickFillModal';
+import { getLatestConsultationInsight, applyQuickFillToDocument } from '../utils/quickFillHelper';
 import { IntakeFormView } from './forms/IntakeFormView';
 import { AssessmentFormView } from './forms/AssessmentFormView';
 import { ScoringFormView } from './forms/ScoringFormView';
@@ -78,6 +83,7 @@ interface FormEditorProps {
   userSettings?: UserSettings;
   onSaveDocument: (doc: CaseDocument) => void;
   onSelectClientForNewDoc?: (client: ClientProfile) => void;
+  consultationInsights?: ConsultationInsight[];
 }
 
 export const FormEditor: React.FC<FormEditorProps> = ({
@@ -85,11 +91,13 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   clients,
   userSettings,
   onSaveDocument,
+  onSelectClientForNewDoc,
+  consultationInsights,
 }) => {
   // Form active document state
   const [doc, setDoc] = useState<CaseDocument>(() => {
     if (currentDocument) return currentDocument;
-    return createEmptyDocument('intake', clients[0]);
+    return createEmptyDocument('intake', clients[0], userSettings);
   });
 
   const [activeDocType, setActiveDocType] = useState<DocumentType>(
@@ -106,6 +114,38 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   const [collaborationNoticeToast, setCollaborationNoticeToast] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState<ConditionPresetId>('standard');
   const [presetAppliedToast, setPresetAppliedToast] = useState<string | null>(null);
+
+  // Quick-Fill State (어르신 프로필 및 최근 상담 인사이트 기반 자동완성)
+  const [isQuickFillModalOpen, setIsQuickFillModalOpen] = useState<boolean>(false);
+  const [quickFillToast, setQuickFillToast] = useState<string | null>(null);
+
+  const activeClient = clients.find((c) => c.id === doc.clientId) || clients[0];
+  const activeInsight = getLatestConsultationInsight(activeClient?.id || '', activeClient, consultationInsights);
+
+  const handleOpenQuickFill = () => {
+    setIsQuickFillModalOpen(true);
+  };
+
+  const handleApplyQuickFill = (updatedDoc: CaseDocument, filledCount: number, summaryMessage: string) => {
+    setDoc(updatedDoc);
+    try {
+      confetti({
+        particleCount: 55,
+        spread: 75,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {}
+    setQuickFillToast(summaryMessage);
+    setTimeout(() => setQuickFillToast(null), 5000);
+  };
+
+  // Instant 1-click Quick-Fill
+  const handleInstantQuickFill = () => {
+    if (!activeClient) return;
+    const result = applyQuickFillToDocument(doc, activeClient, activeInsight, userSettings);
+    const summaryMsg = `⚡ '${activeClient.name}' 어르신 프로필 및 최근 상담 인사이트(${activeInsight.keyIssues.join(', ')})가 총 ${result.filledFieldCount}개 항목에 즉시 반영되었습니다.`;
+    handleApplyQuickFill(result.updatedDoc, result.filledFieldCount, summaryMsg);
+  };
 
   // Batch Accept all AI Proposals
   const handleAcceptAllAIInlineProposals = () => {
@@ -493,12 +533,12 @@ export const FormEditor: React.FC<FormEditorProps> = ({
     if (doc.documentType !== type) {
       // Find matching client
       const matchedClient = clients.find((c) => c.id === doc.clientId) || clients[0];
-      const newBlank = createEmptyDocument(type, matchedClient);
+      const newBlank = createEmptyDocument(type, matchedClient, userSettings);
       setDoc({
         ...newBlank,
         clientName: doc.clientName || matchedClient?.name || '',
         clientId: doc.clientId || matchedClient?.id || '',
-        author: doc.author,
+        author: resolveDocumentAuthor(doc.author, userSettings),
       });
     }
   };
@@ -756,6 +796,29 @@ export const FormEditor: React.FC<FormEditorProps> = ({
 
         {/* Right: Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Quick-Fill (어르신 프로필 및 최근 상담 인사이트 연동 자동완성) */}
+          <div className="inline-flex rounded-xl shadow-xs">
+            <button
+              id="btn-quick-fill-trigger"
+              type="button"
+              onClick={handleOpenQuickFill}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black rounded-l-xl border border-r-0 border-amber-500 dark:border-amber-600 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white transition-all cursor-pointer active:scale-95"
+              title="어르신 프로필 및 최근 상담 인사이트 데이터를 불러와 법정 공통 서식 항목을 일괄 자동채우기 (미리보기 및 상세 설정)"
+            >
+              <Zap className="w-3.5 h-3.5 fill-white text-white animate-pulse" />
+              <span>퀵필 (Quick-Fill)</span>
+            </button>
+            <button
+              id="btn-quick-fill-instant"
+              type="button"
+              onClick={handleInstantQuickFill}
+              className="px-2 py-1.5 text-[11px] font-bold rounded-r-xl border border-amber-500 dark:border-amber-600 bg-orange-600 hover:bg-orange-700 text-white transition-all cursor-pointer"
+              title="검토창 없이 즉시 1-클릭 빠른 자동채우기"
+            >
+              ⚡즉시반영
+            </button>
+          </div>
+
           {/* Voice Dictation Button (구두 받아쓰기) */}
           <button
             id="btn-voice-dictation-editor"
@@ -900,6 +963,67 @@ export const FormEditor: React.FC<FormEditorProps> = ({
         </div>
       </div>
 
+      {/* Quick-Fill Toast Notification */}
+      {quickFillToast && (
+        <div
+          id="toast-quick-fill-success"
+          className="p-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3 text-xs font-bold animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+              <Zap className="w-3.5 h-3.5 fill-white text-white" />
+            </div>
+            <span>{quickFillToast}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setQuickFillToast(null)}
+            className="p-1 hover:bg-white/20 rounded-md transition-colors cursor-pointer text-white/90 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Quick-Fill Active Status Indicator Banner */}
+      {doc.formSpecificFields?.isQuickFilled && (
+        <div
+          id="banner-quick-fill-synced"
+          className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-amber-300/80 dark:border-amber-700/80 bg-gradient-to-r from-amber-50/90 via-orange-50/50 to-amber-50/90 dark:from-amber-950/40 dark:via-orange-950/20 dark:to-amber-950/40 text-xs text-amber-950 dark:text-amber-200 shadow-xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-lg bg-amber-500 flex items-center justify-center text-white shrink-0 shadow-2xs">
+              <Zap className="w-3.5 h-3.5 fill-white" />
+            </div>
+            <div>
+              <span className="font-black text-amber-900 dark:text-amber-100">
+                ⚡ 퀵필(Quick-Fill) 연동 완료:
+              </span>{' '}
+              <span className="text-stone-700 dark:text-stone-300">
+                <strong>[{doc.clientName} 어르신 프로필]</strong> 및 최근 상담 인사이트(
+                <strong className="text-amber-800 dark:text-amber-300">{activeInsight.timestamp}</strong>)의 3줄 요약, 핵심 이슈, 추천 서비스가 본 서식에 자동 연동되었습니다.
+              </span>
+              {doc.formSpecificFields.quickFillTimestamp && (
+                <span className="text-stone-500 dark:text-stone-400 text-[11px] ml-1.5">
+                  ({doc.formSpecificFields.quickFillTimestamp} 반영)
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              id="btn-reopen-quick-fill-banner"
+              type="button"
+              onClick={handleOpenQuickFill}
+              className="px-2.5 py-1 rounded-lg text-xs font-bold border border-amber-300 dark:border-amber-700 bg-white dark:bg-stone-800 text-amber-900 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-stone-700 transition-colors cursor-pointer shadow-2xs"
+            >
+              매핑 검토 / 재반영
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Voice Dictation Live Control Bar & Field Target Indicator */}
       {(isDictating || dictationToast) && (
         <div className="bg-gradient-to-r from-purple-950/90 via-[#2E202B] to-[#1E1916] border-2 border-purple-500/80 rounded-2xl p-4 text-white shadow-lg space-y-3 animate-fade-in transition-all">
@@ -983,6 +1107,17 @@ export const FormEditor: React.FC<FormEditorProps> = ({
           )}
         </div>
       )}
+
+      {/* Quick-Fill Modal (어르신 프로필 및 최근 상담 인사이트 기반 자동완성 모달) */}
+      <QuickFillModal
+        isOpen={isQuickFillModalOpen}
+        onClose={() => setIsQuickFillModalOpen(false)}
+        doc={doc}
+        client={activeClient}
+        insight={activeInsight}
+        userSettings={userSettings}
+        onApply={handleApplyQuickFill}
+      />
 
       {/* Official Ministry of Health & Welfare Standard Print/PDF Modal */}
       <OfficialPrintExportModal
@@ -1869,12 +2004,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.title || ''}
                 onChange={(val) => handleFieldChange('title', val)}
                 confidence={96}
-                aiRationale="내담자 성명, 연령, 거주유형 및 초기 주호소 내용을 기반으로 표준 공문서 표제어 생성"
-                alternatives={[
-                  `[재가노인지원] ${doc.clientName || '어르신'} 어르신 만성질환 및 영양위기 통합사례관리 계획서`,
-                  `[사례관리] ${doc.clientName || '어르신'} 대상자 안전확인 및 일상생활지원 서비스 실행계획서`,
-                  `[초기사정] ${doc.clientName || '어르신'} 독거어르신 낙상예방 및 주거환경개선 지원서식`,
-                ]}
+                aiRationale={getFieldEvidenceQuote('title', doc)
+                  ? `실제 발화 근거: "${getFieldEvidenceQuote('title', doc)}"`
+                  : `${doc.clientName || '내담자'} 성명, 연령, 거주유형 및 초기 주호소 내용을 기반으로 표준 공문서 표제어 생성`}
+                alternatives={getContextualFieldAlternatives('title', doc)}
                 type="input"
               />
 
@@ -1886,12 +2019,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.formSpecificFields?.problemAndNeeds || doc.executiveSummary?.join('\n') || ''}
                 onChange={(val) => handleSpecificFieldChange('problemAndNeeds', val)}
                 confidence={94}
-                aiRationale="상담 대화록 상의 어르신 주호소(식사 곤란, 통증, 고립감)를 복지부 표준 욕구 범주로 구조화"
-                alternatives={[
-                  '퇴행성 관절염으로 인한 보행 불안정 및 화장실 이동 시 낙상 위험 호소. 주 1회 밑반찬으로는 주말 결식 우려 높아 영양 지원 욕구 높음.',
-                  '배우자 사별 후 만성 우울감 및 고립감 심화. 식욕 부진 및 규칙적 식사 거름으로 인한 체중 감소 관찰됨.',
-                  '노후 주택의 높은 문턱과 조명 조도 부족으로 주거 낙상 위험 노출. 지역사회 자원 연계 희망.',
-                ]}
+                aiRationale={getFieldEvidenceQuote('problemAndNeeds', doc)
+                  ? `실제 면담 발화 근거: "${getFieldEvidenceQuote('problemAndNeeds', doc)}"`
+                  : `상담 대화록 상의 ${doc.clientName || '어르신'} 주호소 및 확인된 핵심 욕구를 복지부 표준 욕구 범주로 구조화`}
+                alternatives={getContextualFieldAlternatives('problemAndNeeds', doc)}
                 rows={3}
               />
 
@@ -1906,11 +2037,8 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                   handleFieldChange('shortTermGoals', lines);
                 }}
                 confidence={92}
-                aiRationale="SMART 기법 기반 구체적이고 측정 가능한 3~6개월 단위 복지 개입 목표 도출"
-                alternatives={[
-                  '1. 주 3회 밑반찬 배달 연계로 주 5일 이상 균형 잡힌 영양 섭취 유지\n2. 주거 내 안전손잡이 2개소 설치 및 미끄럼방지 매트 시공으로 낙상사고 0건 달성\n3. 주 1회 생활지원사 안전안부확인 방문으로 정서적 고립감 완화',
-                  '1. 고혈압·당뇨 약물 복약 순응도 90% 이상 달성 (달력형 약달력 제공)\n2. 복지관 어르신 건강체조 프로그램 월 4회 참여로 자립 보행능력 증진\n3. 긴급 위기 상황 대비 비상호출벨 작동 점검 완료',
-                ]}
+                aiRationale={`${doc.clientName || '내담자'} 어르신의 확인된 욕구를 바탕으로 SMART 기법에 따른 3~6개월 단위 복지 개입 목표 도출`}
+                alternatives={getContextualFieldAlternatives('shortTermGoals', doc)}
                 rows={3}
               />
 
@@ -1922,12 +2050,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.riskRationale || ''}
                 onChange={(val) => handleFieldChange('riskRationale', val)}
                 confidence={95}
-                aiRationale="만성질환 복합 여부, 거주안전도, 독거 취약성을 결합하여 위기도(고위험/중위험) 판정 근거 명시"
-                alternatives={[
-                  '양측 퇴행성 관절염 통증으로 실내 이동 시 벽을 짚고 다님. 욕실 바닥 타일 마모 및 문턱 5cm 이상으로 낙상 위험도 매우 높음. 독거 상태로 야간 응급상황 발생 시 대처 불가.',
-                  '최근 3개월간 체중 4kg 감소 및 수면장애 지속. 식사 거르는 횟수 주 3회 이상으로 영양결핍 및 건강악화 위험 상존.',
-                  '가족 부양체계 부재(자녀 연락두절). 경제적 취약계층으로 의료비 부담 가중 및 한파/폭염 시 냉난방 취약.',
-                ]}
+                aiRationale={getFieldEvidenceQuote('riskRationale', doc)
+                  ? `실제 발화 근거: "${getFieldEvidenceQuote('riskRationale', doc)}"`
+                  : `${doc.clientName || '내담자'} 어르신의 건강상태, 거주안전도, 독거 취약성을 종합 판정한 위기도 근거`}
+                alternatives={getContextualFieldAlternatives('riskRationale', doc)}
                 rows={3}
               />
 
@@ -1939,11 +2065,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.physicalHealthStatus || ''}
                 onChange={(val) => handleFieldChange('physicalHealthStatus', val)}
                 confidence={93}
-                aiRationale="기본적 일상생활(옷입기, 식사)과 도구적 일상생활(장보기, 가사) 수행 능력 분석"
-                alternatives={[
-                  '기본적 식사 및 착의는 자립 가능하나, 30분 이상 장거리 보행 및 계단 이용 시 극심한 통증. 무거운 물건 들기 및 대중교통 이용 불가능하여 장보기 IADL 전적 도움 필요.',
-                  '지팡이 등 보행보조기 의존 보행. 손가락 관절 변형으로 가스레인지 조작 및 단추 잠그기 시 소근육 조작 도움 필요.',
-                ]}
+                aiRationale={getFieldEvidenceQuote('physicalHealthStatus', doc)
+                  ? `실제 발화 근거: "${getFieldEvidenceQuote('physicalHealthStatus', doc)}"`
+                  : `면담 중 호소한 신체 증상, 복약 및 일상수행능력(ADL) 분석`}
+                alternatives={getContextualFieldAlternatives('physicalHealthStatus', doc)}
                 rows={3}
               />
 
@@ -1955,11 +2080,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.emotionalCognitiveStatus || ''}
                 onChange={(val) => handleFieldChange('emotionalCognitiveStatus', val)}
                 confidence={91}
-                aiRationale="상담 중 발화 속도, 질문 이해도, 감정 표현(슬픔, 무기력)을 표준 척도 어조로 분석"
-                alternatives={[
-                  '시간, 장소, 인물에 대한 지남력 양호하며 의사소통 원활함. 다만 혼자 있는 시간에 외로움과 우울감을 자주 호소하며 활동 의욕 저하 관찰됨.',
-                  '최근 기억력 감퇴에 대한 불안감 호소. 단기 기억(복약 시간, 날짜) 일부 오차 발생하여 인지선별검사(CIST) 연계 요망.',
-                ]}
+                aiRationale={getFieldEvidenceQuote('emotionalCognitiveStatus', doc)
+                  ? `실제 발화 근거: "${getFieldEvidenceQuote('emotionalCognitiveStatus', doc)}"`
+                  : `상담 중 발화 속도, 질문 이해도, 감정 표현(독거 고립감 등)을 표준 척도 어조로 분석`}
+                alternatives={getContextualFieldAlternatives('emotionalCognitiveStatus', doc)}
                 rows={2}
               />
 
@@ -1971,11 +2095,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.housingEnvironment || ''}
                 onChange={(val) => handleFieldChange('housingEnvironment', val)}
                 confidence={94}
-                aiRationale="주택 형태, 화장실 안전바 유무, 문턱, 채광 및 환기 상태를 복지부 기준 점검"
-                alternatives={[
-                  '단독주택 지하/반지하층 거주로 통풍 및 환기 취약. 화장실 바닥 미끄럼방지 처리 부재 및 변기 옆 안전 손잡이 미설치 상태.',
-                  '노후 다세대 2층 거주로 가파른 외부 계단 이용 필요. 겨울철 동파 위험 및 결로 현상 있음. 실내 단차 3cm 존재.',
-                ]}
+                aiRationale={getFieldEvidenceQuote('housingEnvironment', doc)
+                  ? `실제 발화 근거: "${getFieldEvidenceQuote('housingEnvironment', doc)}"`
+                  : `주택 형태, 안전 취약 요소 및 거주 안전성을 복지부 점검 기준에 맞춰 분석`}
+                alternatives={getContextualFieldAlternatives('housingEnvironment', doc)}
                 rows={2}
               />
 
@@ -1987,11 +2110,10 @@ export const FormEditor: React.FC<FormEditorProps> = ({
                 value={doc.socialWorkerOpinion || ''}
                 onChange={(val) => handleFieldChange('socialWorkerOpinion', val)}
                 confidence={97}
-                aiRationale="전체 상담 분석 결과를 바탕으로 한국사회복지사협회 윤리강령 및 보건복지부 공문서 양식에 부합하는 종합 전문 의견 작성"
-                alternatives={[
-                  `본 대상자는 고령의 독거 상태로, 신체적 관절 통증 및 낙상 위험이 높고 영양 결식 우려가 있는 중점 사례관리 대상자로 사정됨. 우선적으로 영양 밑반찬 배달 서비스(주 3회)와 주거 안전손잡이 설치 자원을 긴급 연계하고, 정기적 유선·방문 모니터링을 통해 고립감을 완화하며 건강 상태 변화를 면밀히 추적 관찰하고자 함.`,
-                  `대상자의 자기결정권을 존중하여 일상생활 자립을 지원하는 맞춤형 서비스 계획 수립이 요구됨. 장기요양보험 등급 신청 지원 및 지역사회 통합돌봄 자원을 단계별로 연계하여 지역사회 내 안전한 계속 거주(AIP: Aging in Place)를 지원할 계획임.`,
-                ]}
+                aiRationale={getFieldEvidenceQuote('socialWorkerOpinion', doc)
+                  ? `실제 발화 인용: "${getFieldEvidenceQuote('socialWorkerOpinion', doc)}"`
+                  : `전체 상담 분석 결과를 바탕으로 ${doc.clientName || '어르신'}을 위한 종합 전문 소견 작성`}
+                alternatives={getContextualFieldAlternatives('socialWorkerOpinion', doc)}
                 rows={4}
               />
             </div>

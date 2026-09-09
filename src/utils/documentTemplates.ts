@@ -1,4 +1,5 @@
-import { DocumentType, CaseDocument, ClientProfile, AIAnalysisResponse } from '../types';
+import { DocumentType, CaseDocument, ClientProfile, AIAnalysisResponse, UserSettings } from '../types';
+import { getEffectiveAgencyName, getEffectiveWorkerFullName, getEffectiveWorkerName } from './userSettingsHelper';
 
 export interface DocumentTypeMeta {
   step: number;
@@ -116,12 +117,19 @@ export const ORDERED_DOC_TYPES: DocumentType[] = [
   'referral',
 ];
 
-export function createEmptyDocument(docType: DocumentType, client?: ClientProfile): CaseDocument {
+export function createEmptyDocument(
+  docType: DocumentType,
+  client?: ClientProfile,
+  userSettings?: UserSettings
+): CaseDocument {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toTimeString().slice(0, 5);
 
   const clientName = client?.name || '홍길동';
+  const effectiveWorkerFullName = getEffectiveWorkerFullName(userSettings, client?.caseWorker || '이현정 사회복지사');
+  const effectiveWorkerName = getEffectiveWorkerName(userSettings, '이현정');
+  const effectiveAgencyName = getEffectiveAgencyName(userSettings, '도봉재가노인지원서비스센터');
 
   return {
     id: `doc-${Date.now()}`,
@@ -131,7 +139,7 @@ export function createEmptyDocument(docType: DocumentType, client?: ClientProfil
     title: `${clientName} 어르신 ${DOCUMENT_TYPE_LABELS[docType].short} (${dateStr})`,
     createdAt: `${dateStr} ${timeStr}`,
     updatedAt: `${dateStr} ${timeStr}`,
-    author: client?.caseWorker || '이상호 사회복지사',
+    author: effectiveWorkerFullName,
     status: '임시저장',
     riskLevel: client?.riskLevel || '중위험',
     primaryNeeds: client ? ['일상생활 식사지원', '만성질환 안부확인', '정서적 지지'] : [],
@@ -144,7 +152,7 @@ export function createEmptyDocument(docType: DocumentType, client?: ClientProfil
     formSpecificFields: {
       // 1. 초기면접지
       intakeDate: dateStr,
-      interviewer: client?.caseWorker || '이상호 사회복지사',
+      interviewer: effectiveWorkerFullName,
       eligibilityStatus: '적격',
       serviceReason: '부양자의 부양능력 약화 및 고령으로 인한 만성질환 거동불편',
       appliedServices: '일상생활지원(밑반찬, 김장, 생신), 정서적지원(심리지지), 보건의료지원',
@@ -214,11 +222,11 @@ export function createEmptyDocument(docType: DocumentType, client?: ClientProfil
       // 4. 사례회의록
       conferenceCategory: '선정',
       conferenceDate: dateStr,
-      conferenceInvestigator: '이상호 사회복지사',
-      conferenceAttendees: '장성태 센터장, 이상호 주임, 정명훈 사회복지사 (총 3명)',
+      conferenceInvestigator: effectiveWorkerFullName,
+      conferenceAttendees: `센터장, ${effectiveWorkerFullName}, 팀장, 간호조무사 (총 4명)`,
       conferenceTopic: `${clientName} 어르신 신규 사례관리 대상자 선정 및 개입계획 심의`,
-      conferenceDiscussion: '대상자의 식생활 불균형과 거동 불편을 고려할 때 주 2회 밑반찬과 정기 안부확인이 시급함',
-      conferenceDecision: '재가노인사례관리 대상자(사례관리형) 선정 가결 및 즉시 서비스 개입 개시',
+      conferenceDiscussion: `• ${effectiveWorkerName} 복지사: 대상자의 식생활 불균형과 거동 불편을 고려할 때 주 2회 밑반찬과 정기 안부확인이 시급함.\n• 팀장: 동절기 김장 지원 및 낙상 예방을 위한 화장실 안전손잡이 긴급 설치 제안.\n• 센터장: 만장일치로 [사례관리형] 대상자로 최종 승인하며, 맞춤돌봄 및 보건소와 긴밀한 협력망 구축 당부.`,
+      conferenceDecision: `1. 재가노인사례관리 대상자(사례관리형) 선정 가결 및 즉시 서비스 개입 개시\n2. 주 2회 밑반찬 배달서비스 및 주 1회 방문상담 즉시 개시 (담당: ${effectiveWorkerName} 복지사)\n3. 화장실 안전손잡이 부착 지원`,
       conferenceDecisionStatus: '제공',
       conferenceStartDate: dateStr,
 
@@ -277,7 +285,7 @@ export function createEmptyDocument(docType: DocumentType, client?: ClientProfil
 
       // 10. 연계 및 의뢰
       referralTargetAgency: '성당노인복지센터 재가노인지원사업팀',
-      referralSenderAgency: '(사)굿실버복지회 굿실버노인복지센터',
+      referralSenderAgency: effectiveAgencyName,
       referralReason: '어르신 거주지 이전(달서구 상인동 → 성당동)에 따른 서비스 관할 이관 의뢰',
       referralRequests: {
         dailyLiving: '밑반찬배달 주 2회, 김장·절기서비스 지속',
@@ -296,13 +304,15 @@ export function mapAiResponseToDocument(
   aiData: AIAnalysisResponse,
   client?: ClientProfile,
   transcriptText?: string,
-  rawNotes?: string
+  rawNotes?: string,
+  userSettings?: UserSettings
 ): CaseDocument {
-  const blank = createEmptyDocument(docType, client);
+  const blank = createEmptyDocument(docType, client, userSettings);
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toTimeString().slice(0, 5);
   const clientName = client?.name || aiData.clientName || '어르신';
+  const effectiveWorkerFullName = getEffectiveWorkerFullName(userSettings, client?.caseWorker || '이현정 사회복지사');
 
   return {
     ...blank,
@@ -313,7 +323,7 @@ export function mapAiResponseToDocument(
     title: `${clientName} 어르신 ${DOCUMENT_TYPE_LABELS[docType].short} (${dateStr})`,
     createdAt: `${dateStr} ${timeStr}`,
     updatedAt: `${dateStr} ${timeStr}`,
-    author: client?.caseWorker || '이상호 사회복지사',
+    author: effectiveWorkerFullName,
     status: '작성완료',
     sourceTranscript: transcriptText,
     rawNotes: rawNotes,
@@ -329,21 +339,62 @@ export function mapAiResponseToDocument(
     economicStatus: aiData.economicStatus || blank.economicStatus,
     socialSupportNetwork: aiData.socialSupportNetwork || blank.socialSupportNetwork,
     socialWorkerOpinion: aiData.socialWorkerOpinion || blank.socialWorkerOpinion,
+    evidenceQuotes: aiData.evidenceQuotes || {},
+    contextualAlternatives: aiData.contextualAlternatives || {},
     recommendedServices: aiData.recommendedServices?.length ? aiData.recommendedServices : blank.recommendedServices,
     shortTermGoals: aiData.shortTermGoals?.length ? aiData.shortTermGoals : blank.shortTermGoals,
     longTermGoals: aiData.longTermGoals?.length ? aiData.longTermGoals : blank.longTermGoals,
     formSpecificFields: {
       ...blank.formSpecificFields,
-      conferenceTopic: aiData.formSpecificFields?.conferenceTopic || blank.formSpecificFields?.conferenceTopic,
-      conferenceDiscussion: aiData.formSpecificFields?.conferenceDiscussion || blank.formSpecificFields?.conferenceDiscussion,
+      ...(aiData.formSpecificFields || {}),
+      counselingPurpose: aiData.formSpecificFields?.counselingPurpose ||
+        (aiData.primaryNeeds?.length ? `${clientName} 어르신 ${aiData.primaryNeeds.slice(0, 3).join(', ')} 지원 및 안전확인` : blank.formSpecificFields?.counselingPurpose),
+      counselingContent: aiData.formSpecificFields?.counselingContent ||
+        (aiData.executiveSummary?.length ? aiData.executiveSummary.map((s) => `• ${s}`).join('\n') : blank.formSpecificFields?.counselingContent),
+      conferenceTopic: aiData.formSpecificFields?.conferenceTopic || `${clientName} 어르신 사례관리 개입계획 및 서비스 제공 심의`,
+      conferenceDiscussion: aiData.formSpecificFields?.conferenceDiscussion || aiData.socialWorkerOpinion || blank.formSpecificFields?.conferenceDiscussion,
       conferenceDecision: aiData.formSpecificFields?.conferenceDecision || blank.formSpecificFields?.conferenceDecision,
       monitoringChange: aiData.formSpecificFields?.monitoringChange || blank.formSpecificFields?.monitoringChange,
       monitoringActionTaken: aiData.formSpecificFields?.monitoringActionTaken || blank.formSpecificFields?.monitoringActionTaken,
       terminationReason: aiData.formSpecificFields?.terminationReason || blank.formSpecificFields?.terminationReason,
       notesHealth: aiData.physicalHealthStatus || blank.formSpecificFields?.notesHealth,
       notesLiving: aiData.housingEnvironment || blank.formSpecificFields?.notesLiving,
-      problemAndNeeds: aiData.primaryNeeds?.join(', ') || blank.formSpecificFields?.problemAndNeeds,
-      solutionAndGoals: aiData.shortTermGoals?.join(', ') || blank.formSpecificFields?.solutionAndGoals,
+      problemAndNeeds: aiData.formSpecificFields?.problemAndNeeds ||
+        (aiData.primaryNeeds?.length ? aiData.primaryNeeds.join(', ') : blank.formSpecificFields?.problemAndNeeds),
+      solutionAndGoals: aiData.formSpecificFields?.solutionAndGoals ||
+        (aiData.shortTermGoals?.length ? aiData.shortTermGoals.join(' / ') : blank.formSpecificFields?.solutionAndGoals),
+      shortTermGoal: aiData.formSpecificFields?.shortTermGoal ||
+        (aiData.shortTermGoals?.length ? aiData.shortTermGoals.join(', ') : blank.formSpecificFields?.shortTermGoal),
+      longTermGoal: aiData.formSpecificFields?.longTermGoal ||
+        (aiData.longTermGoals?.length ? aiData.longTermGoals.join(', ') : blank.formSpecificFields?.longTermGoal),
+      workerOpinion: aiData.socialWorkerOpinion || blank.formSpecificFields?.workerOpinion,
+      scoreWorkerComment: aiData.socialWorkerOpinion || blank.formSpecificFields?.scoreWorkerComment,
+      servicePlanDate: aiData.formSpecificFields?.servicePlanDate || dateStr,
+      servicePeriod: aiData.formSpecificFields?.servicePeriod || `${dateStr} ~ 서비스 종결 시까지`,
+      serviceNotes: aiData.formSpecificFields?.serviceNotes || '재가노인지원서비스 연 24회 이상 제공 필수 (물질지원 12회, 정서·기타 12회)',
+      servicePlanList: (aiData.recommendedServices && aiData.recommendedServices.length > 0)
+        ? aiData.recommendedServices.map((s, idx) => ({
+            id: `svc-${idx + 1}`,
+            category: s.category || (idx === 0 ? '1. 일상생활' : idx === 1 ? '2. 정서지원' : '3. 주거·안전'),
+            item: s.serviceName || '맞춤 지원 서비스',
+            frequency: s.frequency || '주 1회',
+            detail: s.purpose || `${s.serviceName} 제공 및 정기 안부확인`,
+            manager: s.provider || '담당 복지사',
+            enabled: true,
+          }))
+        : blank.formSpecificFields?.servicePlanList,
+      aiAutoFilledFields: [
+        'problemAndNeeds',
+        'shortTermGoal',
+        'longTermGoal',
+        'solutionAndGoals',
+        'servicePlanList',
+        'counselingPurpose',
+        'counselingContent',
+        'notesHealth',
+        'notesLiving',
+      ],
+      aiAutoFilledTimestamp: `${dateStr} ${timeStr}`,
     },
   };
 }

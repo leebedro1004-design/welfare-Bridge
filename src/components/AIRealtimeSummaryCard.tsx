@@ -9,34 +9,47 @@ import { DocumentType } from '../types';
 import { DOCUMENT_TYPE_LABELS } from '../utils/documentTemplates';
 
 interface AIRealtimeSummaryCardProps {
-  transcript: string;
+  transcript?: string;
+  transcriptText?: string;
   clientName?: string;
-  currentDocumentType: DocumentType;
+  clientId?: string;
+  currentDocumentType?: DocumentType;
+  defaultDocType?: DocumentType;
   onApplyMappedDraftToForm: (docType: DocumentType, mappedData: Record<string, any>) => void;
   onSelectDocumentType?: (type: DocumentType) => void;
 }
 
 export const AIRealtimeSummaryCard: React.FC<AIRealtimeSummaryCardProps> = ({
   transcript,
+  transcriptText,
   clientName = '상담 어르신',
+  clientId,
   currentDocumentType,
+  defaultDocType,
   onApplyMappedDraftToForm,
   onSelectDocumentType,
 }) => {
-  const [targetDocType, setTargetDocType] = useState<DocumentType>(currentDocumentType || 'intake');
+  const effectiveTranscript = transcript || transcriptText || '';
+  const initialDocType = currentDocumentType || defaultDocType || 'intake';
+  const [targetDocType, setTargetDocType] = useState<DocumentType>(initialDocType);
   const [summaryData, setSummaryData] = useState<RealtimeConsultationSummary>(() =>
-    extractRealtimeConsultationSummary(transcript, clientName, targetDocType)
+    extractRealtimeConsultationSummary(effectiveTranscript, clientName, initialDocType)
   );
   const [isApproved, setIsApproved] = useState<boolean>(false);
   const [showMappingDetail, setShowMappingDetail] = useState<boolean>(false);
 
   // Re-extract whenever transcript or targetDocType changes
   React.useEffect(() => {
-    if (transcript) {
-      const summary = extractRealtimeConsultationSummary(transcript, clientName, targetDocType);
-      setSummaryData(summary);
+    const text = transcript || transcriptText || '';
+    if (text) {
+      try {
+        const summary = extractRealtimeConsultationSummary(text, clientName, targetDocType);
+        setSummaryData(summary);
+      } catch (e) {
+        console.warn('Failed to extract realtime consultation summary', e);
+      }
     }
-  }, [transcript, clientName, targetDocType]);
+  }, [transcript, transcriptText, clientName, targetDocType]);
 
   const handleDocTypeChange = (type: DocumentType) => {
     setTargetDocType(type);

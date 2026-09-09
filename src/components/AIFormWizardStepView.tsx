@@ -161,9 +161,10 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
     { id: 6, title: '최종 서식 승인 & 완성', desc: '10대 법정서식 완본 검토 및 공식 등록', icon: <FileText className="w-4 h-4" /> },
   ];
 
-  const handleCompleteAndSave = () => {
+  const handleCompleteAndSave = (overrideDocType?: DocumentType) => {
+    const targetType = overrideDocType || documentType;
     const finalDoc = mapAiResponseToDocument(
-      documentType,
+      targetType,
       formData,
       client,
       transcriptText,
@@ -199,9 +200,8 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
     } catch (e) {}
 
     setIsSavedSuccess(true);
-    setTimeout(() => {
-      onFinishAndSave(finalDoc);
-    }, 600);
+    // Immediately persist and transition to basic form editor
+    onFinishAndSave(finalDoc);
   };
 
   return (
@@ -840,6 +840,43 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Step 5 Direct Save & Transfer to Form Editor Banner */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-teal-500/10 border-2 border-emerald-400 dark:border-emerald-700/80 space-y-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <h4 className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
+                          서비스 계획 단계 반영 & 기본 서식체계 즉시 이동
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-stone-600 dark:text-stone-400 leading-relaxed">
+                        작성·수정하신 서비스 계획({formData.recommendedServices?.length || 0}개 항목)과 단기·장기 목표가
+                        <strong> 10대 기본 서식체계(서비스계획서 및 종합사정표)에 즉시 매핑</strong>되며 서식 편집기로 바로 전환됩니다.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteAndSave()}
+                      className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-100" />
+                      <span>✨ 수정한 내용 반영하고 기본 서식체계로 저장/이동</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(6)}
+                      className="w-full sm:w-auto py-3 px-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-[#1E1916] text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>6단계 최종 확인 보기</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -914,19 +951,19 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
                 <div className="pt-2 space-y-3">
                   <button
                     type="button"
-                    onClick={handleCompleteAndSave}
+                    onClick={() => handleCompleteAndSave()}
                     disabled={isSavedSuccess}
                     className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm sm:text-base shadow-lg shadow-emerald-700/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
                   >
                     {isSavedSuccess ? (
                       <>
                         <CheckCircle2 className="w-5 h-5 text-white" />
-                        <span>서식 작성 완료 및 저장 중...</span>
+                        <span>서식 작성 완료 및 기본 서식체계로 이동 중...</span>
                       </>
                     ) : (
                       <>
                         <Save className="w-5 h-5" />
-                        <span>서식 최종 완성 및 문서 보관함 / 편집기로 열기</span>
+                        <span>서식 최종 완성 및 기본 서식체계(편집기)로 저장/이동</span>
                         <ArrowRight className="w-5 h-5" />
                       </>
                     )}
@@ -948,7 +985,27 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
               </button>
 
               <div className="flex items-center gap-2">
-                {currentStep < 6 ? (
+                {currentStep === 5 ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleCompleteAndSave()}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                      title="5단계에서 수정한 서비스 계획을 즉시 반영하여 기본 서식체계로 이동합니다"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>기본 서식체계로 저장 & 이동</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(6)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                    >
+                      <span>다음 단계 (최종 승인)</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : currentStep < 6 ? (
                   <button
                     type="button"
                     onClick={() => setCurrentStep((prev) => Math.min(prev + 1, 6))}
@@ -960,7 +1017,7 @@ export const AIFormWizardStepView: React.FC<AIFormWizardStepViewProps> = ({
                 ) : (
                   <button
                     type="button"
-                    onClick={handleCompleteAndSave}
+                    onClick={() => handleCompleteAndSave()}
                     className="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
                   >
                     <CheckCircle2 className="w-4 h-4" />

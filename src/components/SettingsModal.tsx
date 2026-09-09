@@ -23,8 +23,9 @@ import {
   Bell,
   BellRing
 } from 'lucide-react';
-import { UserSettings, GoogleAuthUser } from '../types';
+import { UserSettings, GoogleAuthUser, CaseDocument, ClientProfile } from '../types';
 import { googleDriveService } from '../utils/googleDriveService';
+import { CloudSyncMonitoringCard } from './CloudSyncMonitoringCard';
 import confetti from 'canvas-confetti';
 
 interface SettingsModalProps {
@@ -38,6 +39,8 @@ interface SettingsModalProps {
   onBackupToDrive?: () => void;
   isBackingUp?: boolean;
   onOpenScheduler?: () => void;
+  documents?: CaseDocument[];
+  clients?: ClientProfile[];
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -51,9 +54,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onBackupToDrive,
   isBackingUp = false,
   onOpenScheduler,
+  documents = [],
+  clients = [],
 }) => {
   const [form, setForm] = useState<UserSettings>({ ...settings });
-  const [activeTab, setActiveTab] = useState<'general' | 'approval' | 'gdrive' | 'dashboard'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'approval' | 'gdrive' | 'monitoring'>('general');
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
 
   if (!isOpen) return null;
@@ -152,8 +157,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
             }`}
           >
-            <Cloud className="w-4 h-4" />
+            <Cloud className={`w-4 h-4 ${isBackingUp ? 'animate-smooth-spin text-amber-600' : ''}`} />
             <span>구글 계정 & 드라이브 연동</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('monitoring')}
+            className={`py-3 px-3 border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'monitoring'
+                ? 'border-amber-600 text-amber-900 dark:text-amber-300 font-bold bg-white dark:bg-[#1E1916] rounded-t-lg'
+                : 'border-transparent text-stone-500 hover:text-stone-800 dark:hover:text-stone-300'
+            }`}
+          >
+            <div className="relative flex items-center">
+              <Cloud className={`w-4 h-4 ${isBackingUp ? 'animate-smooth-spin text-amber-600' : ''}`} />
+              {isBackingUp && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+              )}
+            </div>
+            <span>클라우드 동기화 모니터링</span>
           </button>
         </div>
 
@@ -400,6 +423,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 3: Google Account & Drive Sync */}
           {activeTab === 'gdrive' && (
             <div className="space-y-5">
+              {/* Cloud Sync Monitoring Card (Real-time Status, Consistency Check, Error Logs & 5-Event Timeline) */}
+              <CloudSyncMonitoringCard
+                userSettings={form}
+                googleUser={user}
+                documents={documents}
+                clients={clients}
+                onTriggerSync={onBackupToDrive}
+                isSyncing={isBackingUp}
+                onSignInWithGoogle={onSignInWithGoogle}
+                onOpenScheduler={onOpenScheduler}
+              />
+
               {/* Logged in Google User Card */}
               <div className="p-4 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50/80 dark:bg-[#251E1A] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -576,6 +611,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: Cloud Sync Monitoring Dedicated View */}
+          {activeTab === 'monitoring' && (
+            <div className="space-y-5">
+              <CloudSyncMonitoringCard
+                userSettings={form}
+                googleUser={user}
+                documents={documents}
+                clients={clients}
+                onTriggerSync={onBackupToDrive}
+                isSyncing={isBackingUp}
+                onSignInWithGoogle={onSignInWithGoogle}
+                onOpenScheduler={onOpenScheduler}
+              />
+
+              {/* Quick Link to Google Drive Settings */}
+              <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-[#251E1A] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="font-bold text-xs text-stone-900 dark:text-stone-100">
+                    구글 드라이브 계정 및 저장 폴더 설정 변경
+                  </div>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                    현재 구글 계정 인증 토큰 갱신 또는 폴더명({form.driveFolderName}) 수정을 원하시면 구글 연동 탭으로 이동하세요.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('gdrive')}
+                  className="px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 hover:bg-stone-100 text-xs font-semibold text-stone-700 dark:text-stone-300 cursor-pointer self-start sm:self-center"
+                >
+                  계정 설정 바로가기 &gt;
+                </button>
               </div>
             </div>
           )}

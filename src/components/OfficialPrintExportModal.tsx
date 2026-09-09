@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { CaseDocument, ClientProfile, UserSettings } from '../types';
 import { DOCUMENT_TYPE_LABELS } from '../utils/documentTemplates';
+import { getEffectiveAgencyName, resolveDocumentAuthor, getEffectiveSealText } from '../utils/userSettingsHelper';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import confetti from 'canvas-confetti';
@@ -105,9 +106,9 @@ export const OfficialPrintExportModal: React.FC<OfficialPrintExportModalProps> =
     act: '보건복지부 노인보건복지사업안내',
   };
 
-  const agencyName = userSettings?.agencyName || userSettings?.institutionName || '도봉재가노인지원서비스센터';
-  const workerName = doc.author || userSettings?.socialWorkerName || userSettings?.workerName || '이현정 사회복지사';
-  const sealText = userSettings?.sealText || `${agencyName}장인`;
+  const agencyName = getEffectiveAgencyName(userSettings, '도봉재가노인지원서비스센터');
+  const workerName = resolveDocumentAuthor(doc.author, userSettings);
+  const sealText = getEffectiveSealText(userSettings);
 
   // Print via browser
   const handleDirectPrint = () => {

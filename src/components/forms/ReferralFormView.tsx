@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
+import { getEffectiveAgencyName, resolveDocumentAuthor, getEffectiveContactPhone } from '../../utils/userSettingsHelper';
 import { Send, Reply, CheckCircle2, Building, UserCheck } from 'lucide-react';
 import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,6 +16,7 @@ interface FormProps {
 export const ReferralFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,
@@ -87,7 +90,7 @@ export const ReferralFormView: React.FC<FormProps> = ({
               <input
                 type="text"
                 disabled={readOnly}
-                value={fields.referralSourceOrg || '굿실버재가노인지원센터 (담당: 이상호 사회복지사 / ☎ 053-123-4567)'}
+                value={fields.referralSourceOrg?.includes('이상호') ? fields.referralSourceOrg.replace('굿실버재가노인지원센터', getEffectiveAgencyName(userSettings)).replace('이상호 사회복지사', resolveDocumentAuthor(doc.author, userSettings)) : (fields.referralSourceOrg || `${getEffectiveAgencyName(userSettings)} (담당: ${resolveDocumentAuthor(doc.author, userSettings)} / ☎ ${getEffectiveContactPhone(userSettings)})`)}
                 onChange={(e) => onSpecificChange('referralSourceOrg', e.target.value)}
                 className="w-full p-1.5 border rounded bg-white dark:bg-[#1E1916]"
               />

@@ -194,9 +194,9 @@ export const InlineAICollaborationField: React.FC<InlineAIFieldProps> = ({
       {/* Rationale & Alternatives Box (in Collaboration Mode) */}
       {isCollaborationMode && (
         <div className="mt-1 space-y-1">
-          <div className="text-[11px] text-stone-500 dark:text-stone-400 flex items-center gap-1">
-            <Bot className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span className="truncate">추출 근거: {aiRationale}</span>
+          <div className="text-[11px] text-stone-600 dark:text-stone-300 flex items-start gap-1.5 bg-amber-50/60 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/70 dark:border-amber-900/50">
+            <Bot className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <span className="leading-relaxed">사정 근거: {aiRationale}</span>
           </div>
 
           {showAlternatives && alternatives && alternatives.length > 0 && (

@@ -1,4 +1,5 @@
-import { CaseDocument, DocumentType } from '../types';
+import { CaseDocument, DocumentType, UserSettings } from '../types';
+import { getEffectiveWorkerFullName } from './userSettingsHelper';
 
 export interface RealtimeConsultationSummary {
   keywords: string[];
@@ -26,102 +27,151 @@ export interface RealtimeConsultationSummary {
 /**
  * Extracts real-time consultation summary (keywords, emotional state, goals, remarks)
  * immediately after recording ends or transcript is available.
+ * Strictly avoids generic boilerplate (e.g. knee arthritis, toilet bars) and grounds on actual text.
  */
 export function extractRealtimeConsultationSummary(
-  transcript: string,
-  clientName: string = '상담 어르신',
-  targetDocType: DocumentType = 'intake'
+  transcript: string = '',
+  clientName: string = '상담 대상자',
+  targetDocType: DocumentType = 'intake',
+  analysisResult?: any
 ): RealtimeConsultationSummary {
-  const text = transcript.toLowerCase();
+  const text = (transcript || '').toLowerCase();
+  const rawSentences = (transcript || '')
+    .split(/[\n.?!]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 5);
 
-  // 1. Keyword extraction
+  const findFirstSentence = (keywords: string[]): string => {
+    const found = rawSentences.find((s) => {
+      const lower = s.toLowerCase();
+      return keywords.some((k) => lower.includes(k.toLowerCase()));
+    });
+    return found ? found.slice(0, 150) : '';
+  };
+
+  // 1. Keyword extraction from actual dialogue
   const keywords: string[] = [];
-  if (text.includes('무릎') || text.includes('관절') || text.includes('다리') || text.includes('허리')) {
-    keywords.push('만성관절염·보행제한');
-  }
-  if (text.includes('식사') || text.includes('밥') || text.includes('반찬') || text.includes('입맛') || text.includes('결식')) {
-    keywords.push('식사결식·영양취약');
-  }
-  if (text.includes('혼자') || text.includes('독거') || text.includes('적적') || text.includes('외로') || text.includes('사별')) {
-    keywords.push('독거고령·사회적고립');
-  }
-  if (text.includes('화장실') || text.includes('미끄') || text.includes('문턱') || text.includes('낙상') || text.includes('넘어')) {
-    keywords.push('화장실낙상위험·주거개선');
-  }
-  if (text.includes('혈압') || text.includes('당뇨') || text.includes('약') || text.includes('병원')) {
-    keywords.push('만성질환·복약관리');
-  }
-  if (text.includes('수급') || text.includes('생계') || text.includes('돈') || text.includes('병원비')) {
-    keywords.push('기초생활수급·경제취약');
-  }
-  if (text.includes('장기요양') || text.includes('등급') || text.includes('돌봄')) {
-    keywords.push('장기요양진입·돌봄필요');
+  const healthSentence = findFirstSentence([
+    '무릎', '관절', '다리', '허리', '어깨', '눈', '백내장', '치아', '틀니',
+    '혈압', '당뇨', '심장', '뇌졸중', '치매', '통증', '아프', '약', '병원', '투약', '수술'
+  ]);
+  if (healthSentence) {
+    keywords.push('신체질환·건강관리');
   }
 
-  // Fallbacks if transcript is brief
+  const mealSentence = findFirstSentence([
+    '식사', '밥', '반찬', '끼니', '입맛', '결식', '김치', '국', '라면', '굶', '죽'
+  ]);
+  if (mealSentence) {
+    keywords.push('식사지원·영양취약');
+  }
+
+  const isolationSentence = findFirstSentence([
+    '혼자', '독거', '적적', '외로', '사별', '눈물', '불안', '잠', '불면', '답답'
+  ]);
+  if (isolationSentence) {
+    keywords.push('심리정서·고립감완화');
+  }
+
+  const housingSentence = findFirstSentence([
+    '화장실', '미끄', '문턱', '낙상', '넘어', '보일러', '난방', '추워', '더워', '곰팡이', '누수', '계단'
+  ]);
+  if (housingSentence) {
+    keywords.push('주거환경·안전점검');
+  }
+
+  const econSentence = findFirstSentence([
+    '수급', '생계', '돈', '병원비', '월세', '전기세', '연금'
+  ]);
+  if (econSentence) {
+    keywords.push('경제취약·생계지원');
+  }
+
   if (keywords.length === 0) {
-    keywords.push('독거노인안부', '일상생활지원', '건강상태사정', '복지욕구파악');
+    keywords.push('정기안부확인', '일상생활모니터링', '복지욕구파악');
   }
 
   // 2. Emotional / Psychological State Extraction
-  let primaryEmotion = '외로움 및 고립감 (경계선)';
-  let emotionScore = 65;
+  let primaryEmotion = '안정적 대화 및 협조적 태도';
+  let emotionScore = 45;
   const emotionTags: string[] = [];
 
   if (text.includes('우울') || text.includes('죽고') || text.includes('눈물') || text.includes('슬프') || text.includes('사별')) {
-    primaryEmotion = '상실감 및 중증 우울감';
-    emotionScore = 78;
-    emotionTags.push('상실우울', '정서적지지시급', '우울척도(SGDS-K)점검');
+    primaryEmotion = '심리적 고립감 및 우울 성향';
+    emotionScore = 75;
+    emotionTags.push('정서적지지필요', '우울척도(SGDS-K)점검', '안부확인');
   } else if (text.includes('불안') || text.includes('걱정') || text.includes('겁나') || text.includes('넘어질까')) {
-    primaryEmotion = '신체기능 저하에 따른 불안감';
+    primaryEmotion = '일상생활 불안감 및 신체염려';
     emotionScore = 60;
-    emotionTags.push('낙상불안', '심리적위축', '안전확인요망');
+    emotionTags.push('불안감완화', '안전확인요망', '정기모니터링');
   } else if (text.includes('고마워') || text.includes('반가워') || text.includes('와줘서') || text.includes('감사')) {
-    primaryEmotion = '방문에 대한 안도감 및 높은 신뢰도';
-    emotionScore = 40;
-    emotionTags.push('라포형성우수', '정서적안도', '협조적');
-  } else {
-    primaryEmotion = '사회적 고립에 따른 경증 무기력감';
+    primaryEmotion = '상담원에 대한 신뢰 및 긍정적 라포';
+    emotionScore = 30;
+    emotionTags.push('라포형성우수', '협조적태도', '상담친밀도높음');
+  } else if (isolationSentence) {
+    primaryEmotion = '외로움 및 독거 생활 적적함';
     emotionScore = 55;
-    emotionTags.push('경증고립감', '말벗필요', '정서환기');
+    emotionTags.push('독거고립감', '말벗상담요망');
+  } else {
+    primaryEmotion = '안정적 의사소통 및 보통 정서';
+    emotionScore = 40;
+    emotionTags.push('지남력양호', '협조적');
   }
 
-  const emotionDescription = `${clientName} 어르신은 독거 생활로 인한 사회적 고립감과 신체 기력 저하에 따른 심리적 위축 상태(${primaryEmotion})를 보이며, 복지사 및 자원봉사자의 정기 방문을 통한 지속적 라포 형성과 정서적 지지 개입이 효과적일 것으로 판단됨.`;
+  const emotionDescription = analysisResult?.emotionalCognitiveStatus || (
+    isolationSentence
+      ? `${clientName} 어르신은 상담 중 "${isolationSentence}"라고 진술하며, 독거 생활에 따른 정서적 고립감(${primaryEmotion})을 호소하고 있어 정기적인 말벗 안부 확인이 권장됨.`
+      : `${clientName} 어르신은 의사소통 및 지남력이 양호하며 복지사의 질문에 적극적으로 호응함(${primaryEmotion}).`
+  );
 
-  // 3. Consultation Goals Extraction
-  const primaryGoal = `${clientName} 어르신의 결식 예방 및 일상생활 자립 유지를 위한 통합 재가복지서비스 연계`;
-  const shortTermGoals = [
-    '주 2회 영양 밑반찬 배달 서비스를 통한 결식 예방 및 기본 영양 섭취 개선',
-    '주 1회 정기 방문 및 유선 안부확인을 통한 독거 어르신 안전 모니터링',
-    '화장실 안전손잡이 및 미끄럼방지 매트 설치를 통한 가정 내 낙상 사고 예방',
-  ];
-  const longTermGoals = [
-    '지역사회 내에서 잔존 신체기능을 최대한 유지하며 안전하고 안정된 재가 노후생활 영위',
-    '사회적 지지체계 및 민관 협력 돌봄망 구축을 통한 위기 상황 예방 및 삶의 질 향상',
+  // 3. Health & Living condition strictly from dialogue or analysisResult
+  const healthCondition = analysisResult?.physicalHealthStatus || (
+    healthSentence
+      ? `[내담자 진술]: "${healthSentence}"\n상담 중 호소한 신체 증상에 대한 정기 건강 체크 및 투약 모니터링이 필요함.`
+      : `[상담 중 구체적 만성질환 호소 미언급 - 현장 방문 시 건강 및 복약 상태 정밀 확인 필요]`
+  );
+
+  const livingEnvironment = analysisResult?.housingEnvironment || (
+    housingSentence
+      ? `[내담자 진술]: "${housingSentence}"\n주거 내 위해요인 및 안전 취약점에 대한 환경 점검 및 보완 조치 검토 필요.`
+      : `[상담 중 주거시설 특이 위해사항 미언급 - 정기 방문 시 안전 점검 요망]`
+  );
+
+  // 4. Consultation Goals & Primary Needs
+  const primaryGoal = analysisResult?.primaryNeeds && analysisResult.primaryNeeds.length > 0
+    ? `${clientName} 어르신의 주요 욕구(${analysisResult.primaryNeeds.slice(0, 2).join(', ')}) 해결 및 안전한 재가생활 유지`
+    : `${clientName} 어르신의 일상생활 자립 유지와 정기 안부확인을 위한 맞춤형 재가노인지원서비스 연계`;
+
+  const shortTermGoals = analysisResult?.shortTermGoals || [
+    mealSentence
+      ? '영양 식생활 개선 및 결식 예방을 위한 서비스 연계'
+      : '초기 1개월 내 정기 안부확인 체계 구축 및 생활 안정 도모',
+    housingSentence
+      ? '가정 내 주거 위험요소 점검 및 안전 지원'
+      : '대상자 일상생활 잔존기능 점검 및 모니터링',
   ];
 
-  // 4. Special Remarks & Urgent Risks
+  const longTermGoals = analysisResult?.longTermGoals || [
+    '지역사회 내에서 잔존 기능을 유지하며 존엄하고 안전한 재가 노후생활 지속',
+    '사회적 고립감 해소 및 안정적 복지 안전망 구축',
+  ];
+
+  // 5. Special Remarks & Urgent Risks
   const urgentRisks: string[] = [];
-  if (keywords.some((k) => k.includes('낙상') || k.includes('보행'))) {
-    urgentRisks.push('화장실 문턱 및 욕실 바닥 미끄럼으로 인한 낙상 고위험');
-  }
-  if (keywords.some((k) => k.includes('결식') || k.includes('식사'))) {
-    urgentRisks.push('만성질환 및 치아 결손으로 인한 식사 불규칙 및 영양 불균형');
-  }
-  if (keywords.some((k) => k.includes('고립') || k.includes('우울'))) {
-    urgentRisks.push('배우자 사별 후 이웃 교류 단절로 인한 고독사 위험군 모니터링 필요');
-  }
+  if (healthSentence) urgentRisks.push(`신체건강 호소: "${healthSentence.slice(0, 40)}..."`);
+  if (housingSentence) urgentRisks.push(`주거안전 점검: "${housingSentence.slice(0, 40)}..."`);
+  if (mealSentence) urgentRisks.push(`식사/영양 관리: "${mealSentence.slice(0, 40)}..."`);
+  if (isolationSentence) urgentRisks.push(`심리정서 지원: "${isolationSentence.slice(0, 40)}..."`);
   if (urgentRisks.length === 0) {
-    urgentRisks.push('고령 독거노인 일상생활 지원 및 정기적 안전 확인 필요');
+    urgentRisks.push('독거 어르신 일상생활 지원 및 정기 안전 확인');
   }
 
-  const healthCondition = '양측 퇴행성 무릎 관절염으로 계단 및 장거리 보행 시 지팡이 의존. 고혈압 투약 중이나 규칙적 복약 지도 및 건강 모니터링 필요.';
-  const livingEnvironment = '노후 다세대주택 반지하/저층 거주. 화장실 문턱이 높고 안전바가 부재하여 낙상 위험이 높으며, 동절기 단열 및 결로 개선 요망.';
-  const notes = `${clientName} 어르신은 복지 서비스에 긍정적인 반응을 보이며 밑반찬 지원과 안전바 설치에 강한 욕구를 나타냄. 정기적 사례관리 개입 적극 권장.`;
+  const notes = `${clientName} 어르신 상담 완료. 실제 상담 대화록에 기반하여 확인된 주요 욕구(${keywords.join(', ')})를 중심으로 개입 계획을 수립함.`;
+  const socialWorkerOpinion = analysisResult?.socialWorkerOpinion || (
+    `본 사례는 ${clientName} 어르신의 구체적인 호소 사항(${keywords.join(', ')})을 감안할 때, 대상자의 자립 생활 유지를 돕기 위한 맞춤형 재가노인지원서비스 연계 및 정기 모니터링이 요구됨.`
+  );
 
-  const socialWorkerOpinion = `본 사례는 만성질환과 고령 독거로 인해 일상생활 수행능력(ADL/IADL)이 저하된 대상자로서, 결식 예방을 위한 밑반찬 배달과 주 1회 안전 안부확인, 주거환경 낙상방지 지원을 골자로 하는 재가노인지원서비스 통합 사례관리 개입이 반드시 시급히 요구됨.`;
-
-  // 5. Pre-mapped payload per Document Type
+  // 6. Pre-mapped payload per Document Type
   const mappedFieldsByDocType: Record<string, Record<string, any>> = {
     // 1. 초기면접지 (Intake)
     intake: {
@@ -130,8 +180,8 @@ export function extractRealtimeConsultationSummary(
       physicalHealthStatus: healthCondition,
       housingEnvironment: livingEnvironment,
       socialWorkerOpinion: socialWorkerOpinion,
-      riskRationale: `위기도: 고령 독거, 결식 위험 및 관절염 보행 제한 복합 요인`,
-      riskLevel: '중점위기(고위험군)',
+      riskRationale: `위기도 사정 근거: ${urgentRisks.join(' / ')}`,
+      riskLevel: analysisResult?.riskLevel || (urgentRisks.length >= 3 ? '고위험' : '중위험'),
       shortTermGoals,
       longTermGoals,
       formSpecificFields: {
@@ -151,7 +201,7 @@ export function extractRealtimeConsultationSummary(
       housingEnvironment: livingEnvironment,
       socialWorkerOpinion: socialWorkerOpinion,
       riskRationale: `위기도 판정 근거: ${urgentRisks.join(' / ')}`,
-      riskLevel: '중점위기(고위험군)',
+      riskLevel: analysisResult?.riskLevel || (urgentRisks.length >= 3 ? '고위험' : '중위험'),
       shortTermGoals,
       longTermGoals,
       formSpecificFields: {
@@ -170,7 +220,7 @@ export function extractRealtimeConsultationSummary(
       longTermGoals,
       socialWorkerOpinion: socialWorkerOpinion,
       formSpecificFields: {
-        problemAndNeeds: `${clientName} 어르신은 독거노인으로서 ${keywords.join(', ')} 등의 복합 문제를 겪고 있어 체계적인 서비스 연계가 시급함.`,
+        problemAndNeeds: `${clientName} 어르신 상담을 통해 도출된 주요 과제는 ${keywords.join(', ')}이며, 이에 대한 개별 맞춤 서비스 제공이 필요함.`,
         longTermGoal: longTermGoals[0],
         shortTermGoal: shortTermGoals.join(' / '),
         servicePlanManagerOpinion: socialWorkerOpinion,
@@ -195,18 +245,18 @@ export function extractRealtimeConsultationSummary(
 
 ■ 4. 주요 확인 욕구 및 위험 요인:
 • 중점 욕구: ${keywords.join(', ')}
-• 긴급 위험 요인: ${urgentRisks.join(' / ')}
+• 핵심 사정 요인: ${urgentRisks.join(' / ')}
 
-■ 5. 사회복지사 종합 소견 및 개입 방향:
+■ 5. 사회복지사 종합 소견 및 조치 계획:
 • ${socialWorkerOpinion}`,
         counselingMethod: '방문상담',
         counselingCategory: '정기상담 및 모니터링',
-        counselingNextPlan: `밑반찬 배달 주 2회 지원 및 주 1회 정기 안부확인 지속 유지, 가정 내 낙상방지 안전바 설치 연계`,
+        counselingNextPlan: `확인된 주요 욕구(${keywords.join(', ')})에 대한 단계적 서비스 연계 및 차회 정기 방문 일정 조율`,
         monitoringSummary: notes,
         counselingKeywords: keywords.join(', '),
         clientEmotionalResponse: primaryEmotion,
         monitoringSpecialRemarks: urgentRisks.join(' / '),
-        monitoringPlan: '현 수립된 서비스 계획(밑반찬 주 2회, 안부확인 주 1회) 지속 유지 및 만족도 평가 실시',
+        monitoringPlan: '수립된 맞춤형 계획에 따른 주기적 안부 확인 및 서비스 점검',
         monitoringNeedChanges: `${keywords.join(', ')} 지원 요구 지속`,
         monitoringEnvironmentChanges: healthCondition,
       },
@@ -248,15 +298,17 @@ export function autoFillLegalFormWithConsultation(params: {
   client?: any;
   targetDocType?: DocumentType;
   existingDoc?: CaseDocument | null;
+  userSettings?: UserSettings;
 }): CaseDocument {
-  const { transcript, analysisResult, client, targetDocType = 'monitoring', existingDoc } = params;
+  const { transcript, analysisResult, client, targetDocType = 'monitoring', existingDoc, userSettings } = params;
   const clientName = client?.name || analysisResult?.clientName || '상담 어르신';
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toTimeString().slice(0, 5);
+  const effectiveWorkerFullName = getEffectiveWorkerFullName(userSettings, client?.caseWorker || '이현정 사회복지사');
 
   // Extract real-time consultation summary
-  const summary = extractRealtimeConsultationSummary(transcript, clientName, targetDocType);
+  const summary = extractRealtimeConsultationSummary(transcript, clientName, targetDocType, analysisResult);
 
   // Derive explicit Consultation Purpose (상담 목적)
   let derivedPurpose = '';
@@ -318,7 +370,7 @@ ${execSummaryText}
         title: `${clientName} 어르신 ${targetDocType === 'monitoring' ? '상담 및 모니터링 기록지' : '법정 서식'} (AI 자동 완성)`,
         createdAt: `${dateStr} ${timeStr}`,
         updatedAt: `${dateStr} ${timeStr}`,
-        author: client?.caseWorker || '이상호 사회복지사',
+        author: effectiveWorkerFullName,
         status: '작성완료',
         riskLevel: (analysisResult?.riskLevel || '중위험') as any,
         primaryNeeds: analysisResult?.primaryNeeds || summary.keywords,
@@ -358,34 +410,37 @@ ${execSummaryText}
     emotionalCognitiveStatus: emotionText,
     housingEnvironment: livingText,
     riskRationale: riskText,
+    evidenceQuotes: analysisResult?.evidenceQuotes || baseDoc.evidenceQuotes,
+    contextualAlternatives: analysisResult?.contextualAlternatives || baseDoc.contextualAlternatives,
     formSpecificFields: {
       ...baseDoc.formSpecificFields,
+      ...(analysisResult?.formSpecificFields || {}),
       // Core Auto-fill Legal Form Fields
-      counselingPurpose: derivedPurpose,
-      counselingContent: derivedContent,
+      counselingPurpose: analysisResult?.formSpecificFields?.counselingPurpose || derivedPurpose,
+      counselingContent: analysisResult?.formSpecificFields?.counselingContent || derivedContent,
       counselingMethod: '방문상담',
       counselingCategory: targetDocType === 'intake' ? '초기상담' : '정기상담 및 모니터링',
-      counselingNextPlan: nextPlan,
+      counselingNextPlan: analysisResult?.formSpecificFields?.counselingNextPlan || nextPlan,
       aiAutoFilledFields: autoFilledFields,
       aiAutoFilledTimestamp: `${dateStr} ${timeStr}`,
 
       // 7호 모니터링 및 상담일지 필드 호환
-      monitoringSummary: summary.clientSpecialRemarks.notes,
-      monitoringNeedChanges: `• ${needsText} 관련 서비스 유지 및 보완 희망`,
-      monitoringEnvironmentChanges: healthText,
-      monitoringDetailedNotes: derivedContent,
-      monitoringPlanResult: '서비스 유지',
+      monitoringSummary: analysisResult?.formSpecificFields?.monitoringSummary || summary.clientSpecialRemarks.notes,
+      monitoringNeedChanges: analysisResult?.formSpecificFields?.monitoringNeedChanges || `• ${needsText} 관련 서비스 유지 및 보완 희망`,
+      monitoringEnvironmentChanges: analysisResult?.formSpecificFields?.monitoringEnvironmentChanges || healthText,
+      monitoringDetailedNotes: analysisResult?.formSpecificFields?.monitoringDetailedNotes || derivedContent,
+      monitoringPlanResult: analysisResult?.formSpecificFields?.monitoringPlanResult || '서비스 유지',
 
       // 1호 초기면접지 필드 호환
-      intakeSummary: summary.clientSpecialRemarks.notes,
-      intakeClientEmotion: summary.clientEmotionState.primaryEmotion,
-      intakeHealthStatus: healthText,
-      intakeHousingSafety: livingText,
-      intakeCounselorOpinion: workerOpinionText,
+      intakeSummary: analysisResult?.formSpecificFields?.intakeSummary || summary.clientSpecialRemarks.notes,
+      intakeClientEmotion: analysisResult?.formSpecificFields?.intakeClientEmotion || summary.clientEmotionState.primaryEmotion,
+      intakeHealthStatus: analysisResult?.formSpecificFields?.intakeHealthStatus || healthText,
+      intakeHousingSafety: analysisResult?.formSpecificFields?.intakeHousingSafety || livingText,
+      intakeCounselorOpinion: analysisResult?.formSpecificFields?.intakeCounselorOpinion || workerOpinionText,
 
       // 5호 서비스제공계획서 필드 호환
-      problemAndNeeds: `${clientName} 어르신은 고령 독거 및 만성질환으로 인해 ${needsText} 등의 복합 위험에 노출되어 있어 맞춤형 지원이 요구됨.`,
-      solutionAndGoals: nextPlan,
+      problemAndNeeds: analysisResult?.formSpecificFields?.problemAndNeeds || `${clientName} 어르신은 고령 독거 및 만성질환으로 인해 ${needsText} 등의 복합 위험에 노출되어 있어 맞춤형 지원이 요구됨.`,
+      solutionAndGoals: analysisResult?.formSpecificFields?.solutionAndGoals || nextPlan,
     },
   };
 }

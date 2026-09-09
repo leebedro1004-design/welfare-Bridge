@@ -24,10 +24,13 @@ import {
   Activity,
   Eye,
   ShieldCheck,
-  Building
+  Building,
+  ArrowUpDown,
+  RotateCcw
 } from 'lucide-react';
 import { ClientProfile, RiskLevel, LivingType, WelfareType, DocumentType } from '../types';
 import { ClientConsultationTimeline } from './ClientConsultationTimeline';
+import { sortClients, ClientSortOption } from '../utils/clientSort';
 
 interface ClientListProps {
   clients: ClientProfile[];
@@ -45,6 +48,7 @@ export const ClientList: React.FC<ClientListProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [riskFilter, setRiskFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<ClientSortOption>('recent');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [selectedDetailClient, setSelectedDetailClient] = useState<ClientProfile | null>(null);
   const [detailModalTab, setDetailModalTab] = useState<'info' | 'timeline' | 'emergency'>('timeline');
@@ -67,16 +71,19 @@ export const ClientList: React.FC<ClientListProps> = ({
   const [newDiseases, setNewDiseases] = useState<string>('고혈압, 관절염');
   const [newRisk, setNewRisk] = useState<RiskLevel>('중위험');
 
-  // Filter clients
-  const filteredClients = clients.filter((c) => {
-    const matchesSearch =
-      c.name.includes(searchTerm) ||
-      c.address.includes(searchTerm) ||
-      c.chronicDiseases.some((d) => d.includes(searchTerm));
-    const matchesRisk = riskFilter === 'all' || c.riskLevel === riskFilter;
-    const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-    return matchesSearch && matchesRisk && matchesStatus;
-  });
+  // Filter & Sort clients
+  const filteredClients = React.useMemo(() => {
+    const list = clients.filter((c) => {
+      const matchesSearch =
+        c.name.includes(searchTerm) ||
+        c.address.includes(searchTerm) ||
+        c.chronicDiseases.some((d) => d.includes(searchTerm));
+      const matchesRisk = riskFilter === 'all' || c.riskLevel === riskFilter;
+      const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+      return matchesSearch && matchesRisk && matchesStatus;
+    });
+    return sortClients(list, sortBy);
+  }, [clients, searchTerm, riskFilter, statusFilter, sortBy]);
 
   const handleCreateClient = (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,7 +190,7 @@ export const ClientList: React.FC<ClientListProps> = ({
           <select
             value={riskFilter}
             onChange={(e) => setRiskFilter(e.target.value)}
-            className="text-xs rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-stone-700 focus:ring-2 focus:ring-amber-500"
+            className="text-xs rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-stone-700 focus:ring-2 focus:ring-amber-500 cursor-pointer"
           >
             <option value="all">전체 위기도</option>
             <option value="고위험">고위험 (집중관리)</option>
@@ -197,7 +204,7 @@ export const ClientList: React.FC<ClientListProps> = ({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-xs rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-stone-700 focus:ring-2 focus:ring-amber-500"
+            className="text-xs rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-stone-700 focus:ring-2 focus:ring-amber-500 cursor-pointer"
           >
             <option value="all">전체 상태</option>
             <option value="집중관리">집중관리</option>
@@ -206,6 +213,41 @@ export const ClientList: React.FC<ClientListProps> = ({
             <option value="종결">종결</option>
           </select>
         </div>
+
+        {/* 🔽 Client Sorting Dropdown */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-stone-500 font-medium flex items-center gap-1">
+            <ArrowUpDown className="w-3.5 h-3.5 text-amber-600" />
+            정렬:
+          </span>
+          <select
+            id="select-clientlist-sort"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as ClientSortOption)}
+            className="text-xs rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-stone-800 font-medium focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
+          >
+            <option value="recent">최근 등록순 (Recently Added)</option>
+            <option value="name">성명 가나다순 (Name)</option>
+            <option value="risk">위기도순 (Risk Level)</option>
+          </select>
+        </div>
+
+        {(searchTerm || riskFilter !== 'all' || statusFilter !== 'all' || sortBy !== 'recent') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchTerm('');
+              setRiskFilter('all');
+              setStatusFilter('all');
+              setSortBy('recent');
+            }}
+            className="text-xs px-2.5 py-1.5 rounded-lg text-stone-500 hover:text-stone-800 bg-stone-100 flex items-center gap-1 transition-colors cursor-pointer"
+            title="필터 및 정렬 초기화"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>초기화</span>
+          </button>
+        )}
       </div>
 
       {/* Client Cards Grid */}

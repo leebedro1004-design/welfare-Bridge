@@ -713,8 +713,8 @@ export const ConsultationInsightsCard: React.FC<ConsultationInsightsCardProps> =
         const q = searchInsightQuery.toLowerCase();
         const client = clients.find((c) => c.id === ins.clientId);
         const nameMatch = (ins.clientName || client?.name || '').toLowerCase().includes(q);
-        const summaryMatch = (ins.threeLineSummary || []).some((s) => s.toLowerCase().includes(q));
-        const issuesMatch = (ins.keyIssues || []).some((k) => k.toLowerCase().includes(q));
+        const summaryMatch = (ins.threeLineSummary || []).some((s: string) => (s || '').toLowerCase().includes(q));
+        const issuesMatch = (ins.keyIssues || []).some((k: string) => (k || '').toLowerCase().includes(q));
         const serviceMatch = (ins.recommendedService || '').toLowerCase().includes(q);
         return nameMatch || summaryMatch || issuesMatch || serviceMatch;
       }

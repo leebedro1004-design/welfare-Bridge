@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   FileText,
@@ -31,7 +31,12 @@ import {
   Zap,
   Bookmark,
   Menu,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Mic,
+  MicOff,
+  Radio,
+  Volume2,
+  X
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
 import { CareBridgeLogo } from './CareBridgeLogo';
@@ -109,6 +114,226 @@ export const Header: React.FC<HeaderProps> = ({
   const agencyDisplayName = userSettings?.agencyName || userSettings?.institutionName || '도봉재가노인지원서비스센터';
   const workerDisplayName = userSettings?.socialWorkerName || userSettings?.workerName || '이현정';
   const workerPosition = userSettings?.workerPosition || '선임 사회복지사';
+
+  // ==========================================
+  // AI Voice Command Navigation Feature
+  // ==========================================
+  const [isVoiceCommandActive, setIsVoiceCommandActive] = useState<boolean>(false);
+  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+  const [liveSpokenText, setLiveSpokenText] = useState<string>('');
+  const recognitionRef = useRef<any>(null);
+  const isVoiceActiveRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isVoiceActiveRef.current = isVoiceCommandActive;
+  }, [isVoiceCommandActive]);
+
+  const executeVoiceCommand = (phrase: string) => {
+    const text = phrase.toLowerCase().trim();
+    if (!text) return;
+    setLiveSpokenText(phrase);
+
+    // 1. Open dashboard
+    if (
+      text.includes('open dashboard') ||
+      text.includes('dashboard') ||
+      text.includes('대시보드') ||
+      text.includes('홈') ||
+      text.includes('나의업무') ||
+      text.includes('나의 업무')
+    ) {
+      setActiveTab('portal');
+      setVoiceFeedback('✅ 명령 실행: "Open dashboard" ➔ 나의업무 대시보드로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 2. Add new client
+    if (
+      text.includes('add new client') ||
+      text.includes('new client') ||
+      text.includes('add client') ||
+      text.includes('신규 등록') ||
+      text.includes('신규 어르신') ||
+      text.includes('어르신 등록') ||
+      text.includes('새 대상자') ||
+      text.includes('대상자 등록')
+    ) {
+      if (onOpenNewClientModal) {
+        onOpenNewClientModal();
+        setVoiceFeedback('✅ 명령 실행: "Add new client" ➔ 신규 어르신 등록 창을 열었습니다');
+      } else {
+        setActiveTab('clients');
+        setVoiceFeedback('✅ 명령 실행: "Add new client" ➔ 대상자 관리 화면으로 이동했습니다');
+      }
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 3. Open consultation / start consultation
+    if (
+      text.includes('open consultation') ||
+      text.includes('start consultation') ||
+      text.includes('consultation') ||
+      text.includes('상담 시작') ||
+      text.includes('녹취') ||
+      text.includes('녹취실') ||
+      text.includes('ai 녹취')
+    ) {
+      setActiveTab('ai-studio');
+      setVoiceFeedback('✅ 명령 실행: "Open consultation" ➔ AI 녹취·상담실로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 4. Open forms
+    if (
+      text.includes('open forms') ||
+      text.includes('forms') ||
+      text.includes('서식') ||
+      text.includes('법정 서식') ||
+      text.includes('10대 서식')
+    ) {
+      setActiveTab('forms');
+      setVoiceFeedback('✅ 명령 실행: "Open forms" ➔ 10대 법정서식 화면으로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 5. Open clients
+    if (
+      text.includes('open clients') ||
+      text.includes('clients') ||
+      text.includes('대상자 관리') ||
+      text.includes('어르신 명부') ||
+      text.includes('명부')
+    ) {
+      setActiveTab('clients');
+      setVoiceFeedback('✅ 명령 실행: "Open clients" ➔ 대상자 관리 명부로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 6. Open documents / archive
+    if (
+      text.includes('open documents') ||
+      text.includes('open archive') ||
+      text.includes('documents') ||
+      text.includes('archive') ||
+      text.includes('문서보관함') ||
+      text.includes('보관함')
+    ) {
+      setActiveTab('archive');
+      setVoiceFeedback('✅ 명령 실행: "Open documents" ➔ 문서보관함으로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 7. Open routes
+    if (
+      text.includes('open routes') ||
+      text.includes('routes') ||
+      text.includes('방문 동선') ||
+      text.includes('동선') ||
+      text.includes('일정')
+    ) {
+      setActiveTab('routes');
+      setVoiceFeedback('✅ 명령 실행: "Open routes" ➔ 방문동선·일정으로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 8. Open insights
+    if (
+      text.includes('open insights') ||
+      text.includes('insights') ||
+      text.includes('위험도') ||
+      text.includes('인사이트')
+    ) {
+      setActiveTab('insights');
+      setVoiceFeedback('✅ 명령 실행: "Open insights" ➔ 위험도·인사이트로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+
+    // 9. Open summary report
+    if (
+      text.includes('open summary') ||
+      text.includes('summary report') ||
+      text.includes('종합보고서') ||
+      text.includes('보고서')
+    ) {
+      setActiveTab('summary-report');
+      setVoiceFeedback('✅ 명령 실행: "Open summary report" ➔ 어르신 종합보고서로 이동했습니다');
+      setTimeout(() => setVoiceFeedback(null), 4500);
+      return;
+    }
+  };
+
+  useEffect(() => {
+    if (!isVoiceCommandActive) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+        recognitionRef.current = null;
+      }
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      const recog = new SpeechRecognition();
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.lang = 'ko-KR';
+
+      recog.onresult = (event: any) => {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const phrase = event.results[i][0].transcript;
+          if (phrase) {
+            setLiveSpokenText(phrase);
+            executeVoiceCommand(phrase);
+          }
+        }
+      };
+
+      recog.onerror = (err: any) => {
+        console.warn('Voice command recognition notification:', err?.error || err);
+        if (err.error === 'not-allowed') {
+          setVoiceFeedback('⚠️ 마이크 사용 권한이 필요합니다. 브라우저에서 마이크를 허용해 주세요.');
+        }
+      };
+
+      recog.onend = () => {
+        if (isVoiceActiveRef.current) {
+          try {
+            recog.start();
+          } catch (e) {}
+        }
+      };
+
+      try {
+        recog.start();
+        recognitionRef.current = recog;
+        setVoiceFeedback('🎙️ AI 음성 명령 수신 중: "Open dashboard", "Add new client" 등을 말씀하세요.');
+      } catch (e) {
+        console.error('Failed to start voice command recognition', e);
+      }
+    } else {
+      setVoiceFeedback('🎙️ Web Speech API 미지원 브라우저: 아래 테스트 버튼으로 음성 명령을 시뮬레이션할 수 있습니다.');
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
+    };
+  }, [isVoiceCommandActive]);
 
   return (
     <header className="bg-[#241E1B] text-stone-100 border-b border-[#38302B] sticky top-0 z-40 shadow-sm transition-colors select-none">
@@ -379,6 +604,31 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Quick CTAs */}
           <div className="hidden sm:flex items-center gap-2 pl-2">
+            {/* 🎤 Voice Command Toggle Button */}
+            <button
+              id="header-voice-command-toggle"
+              type="button"
+              onClick={() => setIsVoiceCommandActive((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border shadow-xs transition-all cursor-pointer hover:scale-[1.02] ${
+                isVoiceCommandActive
+                  ? 'bg-rose-900/90 text-rose-100 border-rose-500 ring-2 ring-rose-500/60 animate-pulse'
+                  : 'bg-stone-800 hover:bg-stone-700 text-stone-200 border-stone-600 hover:text-white'
+              }`}
+              title="AI 음성 내비게이션 명령 토글 ('Open dashboard', 'Add new client' 등)"
+            >
+              {isVoiceCommandActive ? (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-rose-300 animate-bounce" />
+                  <span>Voice Command ON</span>
+                </>
+              ) : (
+                <>
+                  <MicOff className="w-3.5 h-3.5 text-stone-400" />
+                  <span>Voice Command</span>
+                </>
+              )}
+            </button>
+
             {onOpenNewClientModal && (
               <button
                 id="header-new-client-btn"
@@ -405,6 +655,69 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 3. AI Voice Command Live Listening Status Banner */}
+      {isVoiceCommandActive && (
+        <div className="bg-[#1b1411] border-t border-b border-rose-900/60 px-4 py-2 text-xs transition-all shadow-inner">
+          <div className="max-w-full mx-auto flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+              </span>
+              <span className="font-bold text-rose-300 flex items-center gap-1.5 shrink-0">
+                <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                Voice Command 수신 대기 중:
+              </span>
+              <span className="text-stone-300 truncate max-w-md">
+                {voiceFeedback || '말씀해 보세요: "Open dashboard", "Add new client", "Open archive"...'}
+              </span>
+              {liveSpokenText && (
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded bg-stone-800 text-amber-300 font-mono text-[11px] border border-stone-700">
+                  인식 발화: "{liveSpokenText}"
+                </span>
+              )}
+            </div>
+
+            {/* Quick Test Chips & Close */}
+            <div className="flex items-center gap-1.5 ml-auto">
+              <span className="hidden lg:inline text-[11px] text-stone-400">클릭하여 명령 시뮬레이션:</span>
+              <button
+                type="button"
+                onClick={() => executeVoiceCommand('open dashboard')}
+                className="px-2 py-0.5 rounded-md bg-stone-800 hover:bg-stone-700 text-amber-300 border border-stone-700 text-[11px] cursor-pointer"
+                title="'Open dashboard' 명령 시뮬레이션"
+              >
+                📢 "Open dashboard"
+              </button>
+              <button
+                type="button"
+                onClick={() => executeVoiceCommand('add new client')}
+                className="px-2 py-0.5 rounded-md bg-stone-800 hover:bg-stone-700 text-amber-300 border border-stone-700 text-[11px] cursor-pointer"
+                title="'Add new client' 명령 시뮬레이션"
+              >
+                📢 "Add new client"
+              </button>
+              <button
+                type="button"
+                onClick={() => executeVoiceCommand('open archive')}
+                className="px-2 py-0.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 text-[11px] cursor-pointer hidden md:inline-block"
+                title="'Open archive' 명령 시뮬레이션"
+              >
+                📢 "Open archive"
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsVoiceCommandActive(false)}
+                className="p-1 rounded text-stone-400 hover:text-white hover:bg-stone-800 cursor-pointer ml-1"
+                title="Voice Command 끄기"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

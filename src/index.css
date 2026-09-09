@@ -2,6 +2,19 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@keyframes smooth-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-smooth-spin {
+  animation: smooth-spin 3s linear infinite;
+}
+
 /* Leaflet Map Styles and Custom Overlays */
 .leaflet-container {
   font-family: inherit;

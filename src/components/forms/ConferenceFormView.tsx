@@ -1,11 +1,13 @@
 import React from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
+import { resolveDocumentAuthor, getEffectiveWorkerName, getEffectiveWorkerFullName } from '../../utils/userSettingsHelper';
 import { Users, FileText, CheckCircle, Calendar, Clock } from 'lucide-react';
 import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,12 +16,16 @@ interface FormProps {
 export const ConferenceFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,
 }) => {
   const fields = doc.formSpecificFields || {};
   const conferenceType = fields.conferenceType || '선정회의';
+  const workerName = getEffectiveWorkerName(userSettings, '이현정');
+  const workerFullName = getEffectiveWorkerFullName(userSettings, '이현정 사회복지사');
+  const investigatorName = resolveDocumentAuthor(fields.conferenceInvestigator || doc.author, userSettings);
 
   return (
     <div className="space-y-6 text-stone-900 dark:text-stone-100 print:text-black">
@@ -68,7 +74,7 @@ export const ConferenceFormView: React.FC<FormProps> = ({
                 <input
                   type="text"
                   disabled={readOnly}
-                  value={fields.conferenceInvestigator || '이상호 사회복지사'}
+                  value={investigatorName}
                   onChange={(e) => onSpecificChange('conferenceInvestigator', e.target.value)}
                   className="w-full p-1 border rounded bg-stone-50 dark:bg-[#251E1A]"
                 />
@@ -80,7 +86,7 @@ export const ConferenceFormView: React.FC<FormProps> = ({
                 <input
                   type="text"
                   disabled={readOnly}
-                  value={fields.conferenceAttendees || '장성태 센터장, 이상호 사회복지사, 정명훈 팀장, 박서연 간호조무사 (총 4명)'}
+                  value={fields.conferenceAttendees?.includes('이상호') ? fields.conferenceAttendees.replace('이상호 사회복지사', workerFullName) : (fields.conferenceAttendees || `장성태 센터장, ${workerFullName}, 정명훈 팀장, 박서연 간호조무사 (총 4명)`)}
                   onChange={(e) => onSpecificChange('conferenceAttendees', e.target.value)}
                   className="w-full p-1 border rounded bg-stone-50 dark:bg-[#251E1A]"
                 />
@@ -118,7 +124,7 @@ export const ConferenceFormView: React.FC<FormProps> = ({
           <textarea
             rows={4}
             disabled={readOnly}
-            value={fields.conferenceDiscussion || '• 이상호 복지사: 초기면접 및 사정 결과 우울 점수가 높고 보행 장애가 있어 주 2회 밑반찬과 주 1회 정기 방문상담이 절실함.\n• 정명훈 팀장: 동절기 김장 지원 및 낙상 예방을 위한 화장실 안전손잡이 긴급 설치 제안.\n• 장성태 센터장: 만장일치로 [사례관리형] 대상자로 최종 승인하며, 맞춤돌봄 및 보건소와 긴밀한 협력망 구축 당부.'}
+            value={fields.conferenceDiscussion?.includes('이상호 복지사') ? fields.conferenceDiscussion.replace(/이상호 복지사/g, `${workerName} 복지사`) : (fields.conferenceDiscussion || `• ${workerName} 복지사: 초기면접 및 사정 결과 우울 점수가 높고 보행 장애가 있어 주 2회 밑반찬과 주 1회 정기 방문상담이 절실함.\n• 정명훈 팀장: 동절기 김장 지원 및 낙상 예방을 위한 화장실 안전손잡이 긴급 설치 제안.\n• 장성태 센터장: 만장일치로 [사례관리형] 대상자로 최종 승인하며, 맞춤돌봄 및 보건소와 긴밀한 협력망 구축 당부.`)}
             onChange={(e) => onSpecificChange('conferenceDiscussion', e.target.value)}
             className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed"
           />
@@ -131,7 +137,7 @@ export const ConferenceFormView: React.FC<FormProps> = ({
           <textarea
             rows={3}
             disabled={readOnly}
-            value={fields.conferenceDecision || '1. 사례관리형 대상자로 최종 선정 승인 (선정기준표 31점)\n2. 주 2회 밑반찬 배달서비스 및 주 1회 방문상담 즉시 개시 (담당: 이상호 복지사)\n3. 7월 중 화장실 안전손잡이 부착 지원 (담당: 정명훈 팀장)'}
+            value={fields.conferenceDecision?.includes('이상호 복지사') ? fields.conferenceDecision.replace(/이상호 복지사/g, `${workerName} 복지사`) : (fields.conferenceDecision || `1. 사례관리형 대상자로 최종 선정 승인 (선정기준표 31점)\n2. 주 2회 밑반찬 배달서비스 및 주 1회 방문상담 즉시 개시 (담당: ${workerName} 복지사)\n3. 7월 중 화장실 안전손잡이 부착 지원 (담당: 정명훈 팀장)`)}
             onChange={(e) => onSpecificChange('conferenceDecision', e.target.value)}
             className="w-full p-2 border rounded bg-stone-50 dark:bg-[#251E1A] leading-relaxed font-semibold text-indigo-950 dark:text-indigo-200"
           />

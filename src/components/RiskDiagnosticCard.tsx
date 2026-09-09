@@ -24,10 +24,10 @@ import { DashboardWindow } from './DashboardWindow';
 interface RiskDiagnosticCardProps {
   clients: ClientProfile[];
   documents?: CaseDocument[];
-  isOpen: boolean;
-  isMinimized: boolean;
-  onToggleOpen: (open: boolean) => void;
-  onToggleMinimize: (minimized: boolean) => void;
+  isOpen?: boolean;
+  isMinimized?: boolean;
+  onToggleOpen?: (open: boolean) => void;
+  onToggleMinimize?: (minimized: boolean) => void;
   onSelectClientForAction?: (client: ClientProfile, docType?: DocumentType) => void;
   isDraggable?: boolean;
   onMoveUp?: () => void;

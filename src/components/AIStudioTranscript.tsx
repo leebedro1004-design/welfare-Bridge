@@ -45,7 +45,7 @@ import {
   Activity,
   FileCheck,
   UploadCloud,
-  CheckCircle2,
+  FileSpreadsheet,
   Target,
 } from 'lucide-react';
 import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight } from '../types';
@@ -57,7 +57,14 @@ import {
   extractQuickInsightFromTranscript,
   AudioValidationResult,
 } from '../utils/audioValidator';
-import { prepareOptimizedAudioChunks, AudioChunkPayload, formatDurationKorean, getAudioDurationFast } from '../utils/audioChunker';
+import {
+  prepareOptimizedAudioChunks,
+  AudioChunkPayload,
+  formatDurationKorean,
+  getAudioDurationFast,
+  getAudioDurationViaHtmlAudio,
+  blobToBase64,
+} from '../utils/audioChunker';
 import { autoFillLegalFormWithConsultation } from '../utils/aiConsultationMapper';
 import { PRESET_SCENARIOS } from '../data/mockData';
 import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuides';
@@ -109,7 +116,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [showShortcutHelpModal, setShowShortcutHelpModal] = useState<boolean>(false);
 
   // Consultation Guide Mode states
-  const [activeGuideStageId, setActiveGuideStageId] = useState<number>(1);
+  const [activeGuideStageId, setActiveGuideStageId] = useState<string>(CONSULTATION_STAGES[0]?.id || 'stage-1');
   const [checkedGuideQuestions, setCheckedGuideQuestions] = useState<Record<string, boolean>>({});
   const [aiCustomSuggestedQuestions, setAiCustomSuggestedQuestions] = useState<Array<{ id: string; text: string; rationale: string }>>([]);
   const [isGeneratingAiQuestions, setIsGeneratingAiQuestions] = useState<boolean>(false);
@@ -239,6 +246,17 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [isWizardMode, setIsWizardMode] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Quick Summary (Floating Tip) State
+  const [isGeneratingQuickSummary, setIsGeneratingQuickSummary] = useState<boolean>(false);
+  const [quickSummaryTip, setQuickSummaryTip] = useState<{
+    text: string;
+    clientName: string;
+    time: string;
+    modelUsed?: string;
+  } | null>(null);
+  const [quickSummaryCopied, setQuickSummaryCopied] = useState<boolean>(false);
+  const [quickSummaryNotification, setQuickSummaryNotification] = useState<string | null>(null);
 
   // Text-To-Speech (TTS) State for Social Workers on the Move
   const [isTtsSpeaking, setIsTtsSpeaking] = useState<boolean>(false);
@@ -561,6 +579,54 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     }
   };
 
+  // Quick Summary Generation Handler using Gemini
+  const handleGenerateQuickSummary = async () => {
+    let combined = (transcriptText || '').trim();
+    if (interimTranscript && interimTranscript.trim()) {
+      combined = combined ? `${combined}\n${interimTranscript.trim()}` : interimTranscript.trim();
+    }
+
+    if (!combined) {
+      setErrorMessage(
+        '요약할 실시간 상담 녹취 또는 음성 텍스트가 없습니다. 마이크 녹음을 진행하거나 대화 내용을 입력해 주세요.'
+      );
+      setTimeout(() => setErrorMessage(null), 4000);
+      return;
+    }
+
+    setIsGeneratingQuickSummary(true);
+    try {
+      const targetClient = clients.find((c) => c.id === targetClientId) || selectedClient || clients[0];
+      const res = await fetch('/api/ai/quick-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: combined,
+          clientName: targetClient ? `${targetClient.name} (${targetClient.age}세, ${targetClient.riskLevel})` : '상담 어르신',
+          recordingDuration: isRecording ? formatTimer(recordingSeconds) : undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '퀵 요약 생성 실패');
+      }
+
+      setQuickSummaryTip({
+        text: data.summary,
+        clientName: targetClient?.name || '상담 어르신',
+        time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+        modelUsed: 'gemini-3.8-flash',
+      });
+    } catch (err: any) {
+      console.error('Quick summary generation error:', err);
+      setErrorMessage(`퀵 요약 생성 오류: ${err.message || String(err)}`);
+      setTimeout(() => setErrorMessage(null), 5000);
+    } finally {
+      setIsGeneratingQuickSummary(false);
+    }
+  };
+
   // Audio & File Upload States
   const [isTranscribingAudio, setIsTranscribingAudio] = useState<boolean>(false);
   const [audioProgress, setAudioProgress] = useState<number>(0);
@@ -587,11 +653,20 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const audioAbortControllerRef = useRef<AbortController | null>(null);
   const audioProgressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioElapsedTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentUploadedAudioFileRef = useRef<File | null>(null);
 
   // Statutory Form Auto-Fill State & Handlers
   const [isAutoFillModalOpen, setIsAutoFillModalOpen] = useState<boolean>(false);
   const [autoFillTargetDocType, setAutoFillTargetDocType] = useState<DocumentType>('monitoring');
   const [autoFillToast, setAutoFillToast] = useState<string | null>(null);
+
+  // Loaded Text Document State (for TXT, VTT, SRT, CSV imports)
+  const [loadedTextDocMeta, setLoadedTextDocMeta] = useState<{
+    name: string;
+    charCount: number;
+    preview: string;
+    loadedAt: string;
+  } | null>(null);
 
   // Audio STT Stages definition for visual progress breakdown
   const AUDIO_STT_STAGES = [
@@ -639,14 +714,134 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     return ext;
   };
 
+  // Server-side FFmpeg & Gemini pipeline for high-capacity / AAC / M4A audio files (avoids browser decode crash & 20MB limit)
+  const processLargeAudioFileViaServer = async (
+    file: File,
+    abortController: AbortController,
+    initialDurationSec?: number
+  ) => {
+    const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB per HTTP chunk (well under Nginx & body limits)
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    setAudioStageIndex(1);
+    setTranscribingStatus(`대용량 음성 파일 서버 안전 전송 준비 중 (총 ${totalChunks}개 구간)...`);
+
+    // Step 1: Upload chunks sequentially
+    for (let i = 0; i < totalChunks; i++) {
+      if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunkBlob = file.slice(start, end);
+
+      const chunkBase64 = await blobToBase64(chunkBlob);
+      const uploadProgress = Math.round(((i + 1) / totalChunks) * 20);
+      setAudioProgress(uploadProgress);
+      setTranscribingStatus(
+        `대용량 파일 서버 안전 전송 중 (${i + 1}/${totalChunks} 조각, ${Math.round((end / file.size) * 100)}%)...`
+      );
+
+      const uploadRes = await fetch('/api/ai/upload-audio-chunk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          uploadId,
+          chunkIndex: i,
+          totalChunks,
+          chunkBase64,
+          fileName: file.name,
+        }),
+      });
+
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json().catch(() => ({}));
+        throw new Error(errData.error || `청크 업로드 실패 (${i + 1}/${totalChunks})`);
+      }
+    }
+
+    // Step 2: Start background processing job
+    setAudioStageIndex(2);
+    setAudioProgress(22);
+    setTranscribingStatus(`서버 FFmpeg 16kHz 모노 리샘플링 및 분할 엔진 가동 중...`);
+
+    const startRes = await fetch('/api/ai/start-large-audio-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        uploadId,
+        fileName: file.name,
+        durationSec: initialDurationSec && initialDurationSec > 0 ? initialDurationSec : undefined,
+      }),
+    });
+
+    if (!startRes.ok) {
+      const errData = await startRes.json().catch(() => ({}));
+      throw new Error(errData.error || '대용량 오디오 분석 작업 시작에 실패했습니다.');
+    }
+
+    // Step 3: Poll status every 1.5 seconds until completion
+    let isDone = false;
+    let finalTranscript = '';
+    let finalDurationFormatted = '';
+
+    while (!isDone) {
+      if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      await new Promise((r) => setTimeout(r, 1500));
+
+      const pollRes = await fetch(`/api/ai/audio-job-status/${uploadId}`, {
+        signal: abortController.signal,
+      });
+      if (!pollRes.ok) continue;
+
+      const pollData = await pollRes.json();
+      if (!pollData.success || !pollData.job) continue;
+
+      const job = pollData.job;
+      setAudioProgress(job.progress || 25);
+      setTranscribingStatus(job.statusText || '음성 변환 처리 중...');
+
+      if (job.durationFormatted) {
+        finalDurationFormatted = job.durationFormatted;
+        setAudioFileMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                durationSec: job.totalDurationSec,
+                durationFormatted: job.durationFormatted,
+                totalChunks: job.totalSegments,
+                status: 'processing',
+                statusText: job.statusText,
+              }
+            : null
+        );
+      }
+
+      if (job.status === 'completed') {
+        isDone = true;
+        finalTranscript = job.transcript || '';
+      } else if (job.status === 'error') {
+        throw new Error(job.error || '음성 변환 중 오류가 발생했습니다.');
+      }
+    }
+
+    return {
+      transcript: finalTranscript,
+      durationFormatted: finalDurationFormatted,
+    };
+  };
+
   // Audio file transcription handler with pre-validation, live progress tracking & automated cleanup/insights mapping
-  const processAudioFile = async (file: File) => {
+  const processAudioFile = async (file: File, modeOverride?: 'server' | 'browser') => {
+    // Save reference for one-click recovery and smart retry
+    currentUploadedAudioFileRef.current = file;
+
     // 0. Pre-validation of Audio File Format and Size using audioValidator utility
     const validation = validateAudioFile(file);
     if (!validation.isValid) {
-      const alertMsg = `${validation.errorMessage}\n\n💡 안내: ${validation.suggestion || '지원 형식(MP3, WAV, M4A 등) 파일을 선택해 주세요.'}`;
-      setErrorMessage(`[파일 형식 오류] ${validation.errorMessage}`);
-      alert(alertMsg);
+      setErrorMessage(`[파일 형식 오류] ${validation.errorMessage} (지원 포맷: MP3, WAV, M4A, AAC, OGG 등)`);
       return;
     }
 
@@ -701,151 +896,159 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setUploadedAudioUrl(audioUrl);
       setUploadedAudioFileName(file.name);
 
-      // Stage 1: Audio Analysis, Resampling & Smart Chunking
-      setAudioStageIndex(1);
-      setAudioProgress(15);
-      setTranscribingStatus(`음성 스트림 분석 및 대용량 규격 최적화(16kHz 모노 변환) 준비 중...`);
+      let rawTranscribedText = '';
 
-      let audioChunks: AudioChunkPayload[] = [];
-      let isChunkedAudio = false;
-      let totalAudioDuration = 0;
-
+      // Quickly probe duration via HTMLAudioElement without decoding into memory
+      let probedDurationSec = 0;
       try {
-        // Prepare optimized chunks (< 15MB each, ~6 min slices)
-        const chunkResult = await prepareOptimizedAudioChunks(file, {
-          chunkDurationSec: 360, // 6 minutes per chunk to guarantee safety under 15MB
-          onProgress: (statusMsg, pct) => {
-            setTranscribingStatus(statusMsg);
-            setAudioProgress(pct);
-          },
-        });
-        audioChunks = chunkResult.chunks;
-        isChunkedAudio = chunkResult.isChunked;
-        totalAudioDuration = chunkResult.totalDurationSec;
-
-        setAudioFileMeta((prev) =>
-          prev
-            ? {
-                ...prev,
-                durationSec: totalAudioDuration,
-                durationFormatted: formatDurationKorean(totalAudioDuration),
-                totalChunks: chunkResult.chunks.length,
-                status: 'processing',
-                statusText: chunkResult.isChunked
-                  ? `총 ${chunkResult.chunks.length}개 구간 분할 완료 (순차 AI STT 변환 중)`
-                  : '단일 구간 고음질 변환 중',
-              }
-            : null
-        );
-      } catch (chunkErr: any) {
-        console.warn('Audio chunking / Web Audio decoding fallback:', chunkErr);
-        // Fallback: direct file base64 read for files that could not be decoded in browser
-        setTranscribingStatus(`오디오 데이터를 Base64 규격으로 직접 인코딩 중...`);
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            const base64 = result.includes(',') ? result.split(',')[1] : result;
-            resolve(base64.trim());
-          };
-          reader.onerror = () => reject(new Error('오디오 파일 스트림 읽기에 실패했습니다.'));
-          reader.readAsDataURL(file);
-        });
-
-        audioChunks = [
-          {
-            chunkIndex: 0,
-            totalChunks: 1,
-            startSec: 0,
-            endSec: 0,
-            durationSec: 0,
-            base64: base64Data,
-            mimeType: validation.normalizedMime,
-            sizeMB: Number(sizeMB),
-            timeRangeLabel: '전체',
-          },
-        ];
-        isChunkedAudio = false;
+        probedDurationSec = await getAudioDurationViaHtmlAudio(file);
+        if (probedDurationSec > 0) {
+          const formatted = formatDurationKorean(probedDurationSec);
+          setAudioFileMeta((prev) =>
+            prev ? { ...prev, durationSec: probedDurationSec, durationFormatted: formatted } : null
+          );
+        }
+      } catch (probeErr) {
+        console.warn('Audio duration probing warning:', probeErr);
       }
 
-      // Stage 2: AI STT Transcription (supports sequential chunk processing)
-      setAudioStageIndex(2);
-      const totalChunks = audioChunks.length;
-      const chunkTranscripts: string[] = [];
+      const extLower = (file.name.split('.').pop() || '').toLowerCase();
+      // Determine pipeline:
+      // If modeOverride === 'browser', strictly force browser Web Audio API chunking
+      // If modeOverride === 'server', force server pipeline
+      // Otherwise auto: AAC/M4A/WMA or files > 10MB use direct server pipeline with auto browser fallback
+      const useDirectServerPipeline =
+        modeOverride === 'server' ||
+        (modeOverride !== 'browser' &&
+          (extLower === 'aac' ||
+            extLower === 'm4a' ||
+            extLower === 'wma' ||
+            file.size > 10 * 1024 * 1024));
 
-      for (let i = 0; i < totalChunks; i++) {
-        if (abortController.signal.aborted) {
-          throw new DOMException('Aborted', 'AbortError');
-        }
-
-        const currentChunk = audioChunks[i];
-        const progressBase = 35 + Math.round((i / totalChunks) * 55);
-        setAudioProgress(progressBase);
-
-        if (totalChunks > 1) {
-          setTranscribingStatus(
-            `🎙️ [${i + 1}/${totalChunks} 구간 변환 중: ${currentChunk.timeRangeLabel}] Gemini AI 음성 인식 및 화자 분리 진행 중...`
-          );
-        } else {
-          setTranscribingStatus(
-            `🎙️ Gemini AI 모델이 음성을 듣고 사회복지사/어르신 화자를 분리하여 한국어로 텍스트 변환(STT) 중입니다...`
-          );
-        }
-
-        // Call server STT endpoint with safety headers
-        const response = await fetch('/api/ai/transcribe-audio', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            audioBase64: currentChunk.base64,
-            mimeType: currentChunk.mimeType,
-            fileName: file.name,
-            chunkIndex: currentChunk.chunkIndex,
-            totalChunks: currentChunk.totalChunks,
-            timeRangeLabel: currentChunk.timeRangeLabel,
-          }),
-        });
-
-        // Robust response parsing: reads text first to prevent JSON syntax crash on upstream/HTML error
-        const responseText = await response.text();
-        let data: any = null;
-
+      if (useDirectServerPipeline) {
+        setTranscribingStatus(
+          `🚀 대용량 오디오 전용 고속 엔진 적용: 서버 FFmpeg 16kHz 무손실 분할 및 Gemini STT 파이프라인 가동...`
+        );
         try {
-          data = JSON.parse(responseText);
-        } catch (jsonParseErr) {
-          console.error('Server returned non-JSON response:', responseText.slice(0, 300));
-          if (
-            responseText.includes('upstream') ||
-            response.status === 504 ||
-            response.status === 502
-          ) {
-            throw new Error(
-              `AI 서버 또는 게이트웨이 응답 지연 (Timeout): 음성 처리 시간이 길어졌습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.`
+          const serverResult = await processLargeAudioFileViaServer(file, abortController, probedDurationSec);
+          rawTranscribedText = serverResult.transcript;
+        } catch (serverPipelineErr: any) {
+          if (abortController.signal.aborted) throw serverPipelineErr;
+          console.warn('Server audio pipeline error, attempting Web Audio API client fallback:', serverPipelineErr);
+          setTranscribingStatus('서버 엔진 예외 감지: 브라우저 고정밀 Web Audio API 디코더로 자동 복구 가동...');
+          setAudioProgress(20);
+
+          // Fallback to client-side Web Audio API decoding and chunked STT
+          const chunkResult = await prepareOptimizedAudioChunks(file, {
+            chunkDurationSec: 300,
+            onProgress: (statusMsg, pct) => {
+              setTranscribingStatus(statusMsg);
+              setAudioProgress(pct);
+            },
+          });
+
+          setAudioStageIndex(2);
+          const totalChunks = chunkResult.chunks.length;
+          const chunkTranscripts: string[] = [];
+
+          for (let i = 0; i < totalChunks; i++) {
+            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            const currentChunk = chunkResult.chunks[i];
+            const progressBase = 35 + Math.round((i / totalChunks) * 55);
+            setAudioProgress(progressBase);
+
+            setTranscribingStatus(
+              totalChunks > 1
+                ? `🎙️ [${i + 1}/${totalChunks} 구간: ${currentChunk.timeRangeLabel}] 브라우저 복구 모드 Gemini AI 변환 중...`
+                : `🎙️ Gemini AI 모델이 음성을 변환(STT) 중입니다...`
             );
-          } else if (response.status === 413 || responseText.includes('too large')) {
-            throw new Error(
-              `전송 데이터 용량 초과 (${currentChunk.sizeMB}MB): 분할 구간 데이터가 서버 허용 한도를 초과했습니다.`
-            );
-          } else {
-            throw new Error(
-              `서버 응답 오류 (${response.status} ${response.statusText}): ${responseText.slice(0, 120)}`
-            );
+
+            const response = await fetch('/api/ai/transcribe-audio', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              signal: abortController.signal,
+              body: JSON.stringify({
+                audioBase64: currentChunk.base64,
+                mimeType: currentChunk.mimeType,
+                fileName: file.name,
+                chunkIndex: currentChunk.chunkIndex,
+                totalChunks: currentChunk.totalChunks,
+                timeRangeLabel: currentChunk.timeRangeLabel,
+              }),
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
+              throw new Error(data?.error || `음성 변환 실패 (${i + 1}/${totalChunks} 구간).`);
+            }
+            if (data.transcript) {
+              chunkTranscripts.push(
+                totalChunks > 1 ? `[${currentChunk.timeRangeLabel} 구간]\n${data.transcript.trim()}` : data.transcript.trim()
+              );
+            }
           }
+          rawTranscribedText = chunkTranscripts.join('\n\n');
         }
+      } else {
+        // For small MP3/WAV/OGG files, try client chunking first, with automatic server pipeline fallback
+        try {
+          setAudioStageIndex(1);
+          setAudioProgress(15);
+          setTranscribingStatus(`음성 스트림 분석 및 16kHz 규격 최적화 준비 중...`);
 
-        if (!response.ok || !data.success) {
-          throw new Error(data?.error || `음성 변환 실패 (${i + 1}/${totalChunks} 구간). 다시 시도해 주세요.`);
-        }
+          const chunkResult = await prepareOptimizedAudioChunks(file, {
+            chunkDurationSec: 360,
+            onProgress: (statusMsg, pct) => {
+              setTranscribingStatus(statusMsg);
+              setAudioProgress(pct);
+            },
+          });
 
-        const chunkText = data.transcript || '';
-        if (chunkText.trim()) {
-          chunkTranscripts.push(
-            totalChunks > 1 ? `[${currentChunk.timeRangeLabel} 구간]\n${chunkText.trim()}` : chunkText.trim()
-          );
+          setAudioStageIndex(2);
+          const totalChunks = chunkResult.chunks.length;
+          const chunkTranscripts: string[] = [];
+
+          for (let i = 0; i < totalChunks; i++) {
+            if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+            const currentChunk = chunkResult.chunks[i];
+            const progressBase = 35 + Math.round((i / totalChunks) * 55);
+            setAudioProgress(progressBase);
+
+            setTranscribingStatus(
+              totalChunks > 1
+                ? `🎙️ [${i + 1}/${totalChunks} 구간: ${currentChunk.timeRangeLabel}] Gemini AI 음성 인식 및 화자 분리 진행 중...`
+                : `🎙️ Gemini AI 모델이 음성을 듣고 사회복지사/어르신 화자를 분리하여 변환(STT) 중입니다...`
+            );
+
+            const response = await fetch('/api/ai/transcribe-audio', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              signal: abortController.signal,
+              body: JSON.stringify({
+                audioBase64: currentChunk.base64,
+                mimeType: currentChunk.mimeType,
+                fileName: file.name,
+                chunkIndex: currentChunk.chunkIndex,
+                totalChunks: currentChunk.totalChunks,
+                timeRangeLabel: currentChunk.timeRangeLabel,
+              }),
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
+              throw new Error(data?.error || `음성 변환 실패 (${i + 1}/${totalChunks} 구간).`);
+            }
+            if (data.transcript) {
+              chunkTranscripts.push(
+                totalChunks > 1 ? `[${currentChunk.timeRangeLabel} 구간]\n${data.transcript.trim()}` : data.transcript.trim()
+              );
+            }
+          }
+          rawTranscribedText = chunkTranscripts.join('\n\n');
+        } catch (clientChunkErr: any) {
+          console.warn('Client chunking failed or unsupported format, routing to server FFmpeg pipeline:', clientChunkErr);
+          const serverResult = await processLargeAudioFileViaServer(file, abortController, probedDurationSec);
+          rawTranscribedText = serverResult.transcript;
         }
       }
 
@@ -855,7 +1058,6 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setAudioStageIndex(3);
       setTranscribingStatus(`한국어 대화록 자동 정제 및 실시간 인사이트 동기화 중...`);
 
-      const rawTranscribedText = chunkTranscripts.join('\n\n');
       if (!rawTranscribedText.trim()) {
         throw new Error('음성 파일에서 감지된 발화 내용이 없습니다. 음성이 명확한 녹음 파일인지 확인해 주세요.');
       }
@@ -907,7 +1109,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           : null
       );
       setUploadSuccessBanner(
-        `🎙️ '${file.name}' (${totalChunks > 1 ? `총 ${totalChunks}개 구간 분할 완료` : '전체'}) STT 변환 완료! 대화록 및 실시간 인사이트가 대시보드에 즉시 동기화되었습니다.`
+        `🎙️ '${file.name}' 음성 변환 완료! 대화록 (${cleanedText.length.toLocaleString()}자) 및 실시간 인사이트가 대시보드에 즉시 동기화되었습니다.`
       );
       setTimeout(() => setUploadSuccessBanner(null), 6000);
 
@@ -936,15 +1138,6 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       }
 
       console.error('Audio transcription error:', err);
-      setAudioFileMeta((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: 'error',
-              statusText: '변환 중 오류가 발생했습니다.',
-            }
-          : null
-      );
       let errorMsg = err.message || '음성 파일 변환 중 오류가 발생했습니다.';
       try {
         const parsed = JSON.parse(errorMsg);
@@ -952,6 +1145,16 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           errorMsg = parsed.error.message;
         }
       } catch (e) {}
+
+      setAudioFileMeta((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: 'error',
+              statusText: errorMsg,
+            }
+          : null
+      );
       setErrorMessage(`[음성 인식(STT) 오류] ${errorMsg}`);
     } finally {
       if (audioProgressTimerRef.current) clearInterval(audioProgressTimerRef.current);
@@ -983,7 +1186,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     setTranscribingStatus('');
   };
 
-  // Text/document file handler
+  // Text/document file handler (for TXT, VTT, SRT, CSV, etc.)
   const processTextFile = (file: File) => {
     setErrorMessage(null);
     setUploadSuccessBanner(null);
@@ -993,8 +1196,35 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       const content = event.target?.result as string;
       if (content) {
         setTranscriptText((prev) => (prev.trim() ? `${prev}\n\n[불러온 파일: ${file.name}]\n${content}` : content));
-        setUploadSuccessBanner(`📄 텍스트 파일 '${file.name}'을 성공적으로 불러왔습니다.`);
-        setTimeout(() => setUploadSuccessBanner(null), 4000);
+        
+        setLoadedTextDocMeta({
+          name: file.name,
+          charCount: content.length,
+          preview: content.slice(0, 160).replace(/\n/g, ' '),
+          loadedAt: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        });
+
+        setUploadSuccessBanner(
+          `📄 텍스트 대화록 '${file.name}' (${content.length.toLocaleString()}자)을 성공적으로 불러왔습니다! 이제 아래 'AI 사정 분석 실행' 버튼을 눌러 종합 분석을 시작할 수 있습니다.`
+        );
+        setTimeout(() => setUploadSuccessBanner(null), 8000);
+
+        // Instantly scroll smoothly to the transcript input area so the user sees the imported text
+        setTimeout(() => {
+          const el = document.getElementById('input-transcript-text');
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.focus();
+          }
+        }, 120);
+
+        try {
+          confetti({
+            particleCount: 35,
+            spread: 55,
+            origin: { y: 0.6 },
+          });
+        } catch (e) {}
       }
     };
     reader.onerror = () => {
@@ -1026,10 +1256,10 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       if (isTextDoc) {
         processTextFile(file);
       } else {
-        // Unknown or unsupported format: show alert to prevent premature API failures
-        const alertMsg = `지원되지 않는 파일 형식입니다: '${file.name}'\n\n- 음성 인식(STT): MP3, WAV, M4A, AAC, OGG, WEBM, FLAC\n- 텍스트 문서: TXT, VTT, SRT, JSON, CSV`;
-        setErrorMessage(`[파일 형식 오류] 지원되지 않는 파일 형식: ${file.name}`);
-        alert(alertMsg);
+        // Unknown or unsupported format: show gentle in-app error without blocking browser alert
+        setErrorMessage(
+          `지원되지 않는 파일 형식입니다: '${file.name}' (지원 포맷 - 음성: MP3, WAV, M4A, AAC, OGG / 텍스트: TXT, VTT, SRT, CSV)`
+        );
       }
     }
   };
@@ -1654,21 +1884,25 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
         analysisResult ? (
           <AIFormWizardStepView
             analysisResult={analysisResult}
-            client={clients.find((c) => c.id === targetClientId) || selectedClient || null}
+            client={clients.find((c) => c.id === targetClientId) || selectedClient || undefined}
             documentType={documentType}
             workerNotes={workerNotes}
             transcriptText={transcriptText}
-            focusAreas={focusAreas}
             onUpdateAnalysisResult={(updated) => setAnalysisResult(updated)}
             onFinishAndSave={(finalDoc) => {
+              setActiveMainTab('transcript');
+              setIsWizardMode(false);
               onGenerateDocument(finalDoc);
             }}
-            onPushInsight={(insight) => {
+            onPushInsightToDashboard={(insight) => {
               if (onPushInsightToDashboard) {
                 onPushInsightToDashboard(insight);
               }
             }}
-            onCancel={() => setActiveMainTab('transcript')}
+            onBackToStudio={() => {
+              setActiveMainTab('transcript');
+              setIsWizardMode(false);
+            }}
           />
         ) : (
           <div className="bg-white dark:bg-[#1E1916] rounded-2xl p-8 border border-stone-200 dark:border-stone-800 text-center space-y-4">
@@ -2110,6 +2344,28 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   </button>
                 )}
 
+                {/* ⚡ Quick Summary Button (User Request: AI consultation view one-paragraph summary) */}
+                <button
+                  id="btn-quick-summary"
+                  type="button"
+                  onClick={handleGenerateQuickSummary}
+                  disabled={isGeneratingQuickSummary}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-all cursor-pointer hover:scale-[1.02] disabled:opacity-50"
+                  title="Gemini AI를 활용해 현재 진행 중인 음성 녹취 내용을 한 문단으로 즉시 요약하여 플로팅 팁으로 표시합니다"
+                >
+                  {isGeneratingQuickSummary ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>요약 생성 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                      <span>퀵 요약 (Quick Summary)</span>
+                    </>
+                  )}
+                </button>
+
                 {/* 🎯 Key Segment Bookmark Button */}
                 <button
                   type="button"
@@ -2289,7 +2545,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                     setIsDragOver(false);
                     const files = e.dataTransfer.files;
                     if (files && files[0]) {
-                      processAudioFile(files[0]);
+                      handleIncomingFile(files[0]);
                     }
                   }}
                   onClick={() => fileInputRef.current?.click()}
@@ -2305,10 +2561,10 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                     </div>
                     <div>
                       <p className="text-xs sm:text-sm font-bold text-stone-800 dark:text-stone-200">
-                        상담 녹음 파일을 여기로 드래그하거나 클릭하여 업로드하세요
+                        상담 녹음 파일(AAC/MP3/M4A) 또는 텍스트 대화록(TXT)을 여기로 드래그하세요
                       </p>
                       <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                        지원 포맷: MP3, M4A, WAV, AAC, OGG, WebM (최대 300MB, 1시간 분량) 또는 회의록 텍스트(TXT)
+                        지원 포맷: AAC, M4A, MP3, WAV, OGG, WebM (최대 300MB, 1시간 분량) 또는 회의록 텍스트(TXT, VTT, SRT)
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-[10px] text-stone-500 dark:text-stone-400 font-medium">
@@ -2316,11 +2572,65 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                         ⚡ 16kHz 자동 리샘플링
                       </span>
                       <span className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
-                        ✂️ 6분 단위 대용량 자동 분할
+                        ✂️ 5분 단위 대용량 자동 분할
                       </span>
                       <span className="px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700">
                         🗣️ 복지사·어르신 화자 자동 분리
                       </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 📄 Loaded Text Document Notification & Quick Analysis Card */}
+              {loadedTextDocMeta && !audioFileMeta && !isTranscribingAudio && (
+                <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700/70 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="p-2 rounded-lg bg-amber-600 text-white shrink-0">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-stone-900 dark:text-stone-100 truncate max-w-[240px] sm:max-w-xs">
+                            {loadedTextDocMeta.name}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-amber-200/70 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 text-[10px] font-bold font-mono">
+                            TXT 대화록 • {loadedTextDocMeta.charCount.toLocaleString()}자
+                          </span>
+                          <span className="text-[10px] text-stone-400">
+                            불러온 시간: {loadedTextDocMeta.loadedAt}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-stone-600 dark:text-stone-300 truncate max-w-md sm:max-w-xl mt-0.5 italic">
+                          &quot;{loadedTextDocMeta.preview}&quot;
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById('input-transcript-text');
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.focus();
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-50 cursor-pointer"
+                      >
+                        대화록 확인
+                      </button>
+                      <button
+                        type="button"
+                        onClick={runAIAnalysis}
+                        disabled={isAnalyzing}
+                        className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>AI 사정 분석 실행</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2414,7 +2724,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   {/* Status Detailed Subtext */}
                   <div className="text-[11px] text-stone-600 dark:text-stone-300 bg-white/60 dark:bg-[#1E1916]/60 p-2 rounded-lg border border-stone-200/80 dark:border-stone-800 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${audioFileMeta.status === 'error' ? 'bg-rose-500' : audioFileMeta.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                       <span className="font-semibold text-stone-700 dark:text-stone-200">처리 상태:</span>
                       <span className="truncate">{audioFileMeta.statusText || '파일이 준비되었습니다.'}</span>
                     </span>
@@ -2424,6 +2734,54 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                       </span>
                     )}
                   </div>
+
+                  {/* 🛠️ One-Click Smart Recovery & Retry Action Bar */}
+                  {audioFileMeta.status === 'error' && (
+                    <div className="p-3 bg-rose-50/90 dark:bg-rose-950/50 rounded-xl border border-rose-200 dark:border-rose-900/60 space-y-2.5 shadow-sm">
+                      <div className="flex items-start gap-2 text-xs text-rose-900 dark:text-rose-200">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold">AAC/오디오 음성 변환 중 예외가 발생했습니다.</p>
+                          <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
+                            {audioFileMeta.statusText || '코덱 헤더 또는 시간 지터가 감지되었습니다.'} 원클릭 복구 엔진을 통해 즉시 다시 변환할 수 있습니다.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                        {currentUploadedAudioFileRef.current && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => processAudioFile(currentUploadedAudioFileRef.current!, 'server')}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-colors cursor-pointer"
+                              title="서버 고정밀 지터 보정 파이프라인으로 재시도"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>🚀 스마트 복구 재시도</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => processAudioFile(currentUploadedAudioFileRef.current!, 'browser')}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors cursor-pointer"
+                              title="기기 브라우저 Web Audio API 디코더로 직접 변환"
+                            >
+                              <Activity className="w-3.5 h-3.5 text-blue-600" />
+                              <span>💻 브라우저 엔진 직접 변환</span>
+                            </button>
+                          </>
+                        )}
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-700 transition-colors cursor-pointer">
+                          <span>📁 다른 파일 선택</span>
+                          <input
+                            type="file"
+                            accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,.flac,.wma,audio/*"
+                            className="hidden"
+                            onChange={handleFileUpload}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   {/* 📊 High-Visibility Large File Progress Bar */}
                   {(isTranscribingAudio || audioProgress > 0) && (
@@ -2580,6 +2938,16 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateQuickSummary}
+                      disabled={isGeneratingQuickSummary}
+                      className="px-2 py-1 rounded-md text-[11px] font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="현재까지 녹음된 음성을 즉시 1문단 퀵 요약"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-200" />
+                      <span>{isGeneratingQuickSummary ? '요약 중...' : '녹음 퀵 요약'}</span>
+                    </button>
                     <Volume2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
                     <div className="w-20 h-2 bg-rose-200 dark:bg-rose-900 rounded-full overflow-hidden">
                       <div
@@ -2846,9 +3214,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           {/* ⚡ Real-Time Consultation Summary & Auto-Mapping Card (Triggered upon recording end or when transcript exists) */}
           {(showRealtimeSummary || transcriptText.trim().length > 15) && (
             <AIRealtimeSummaryCard
+              transcript={transcriptText}
               transcriptText={transcriptText}
               clientName={(clients.find((c) => c.id === targetClientId) || selectedClient || clients[0])?.name || '상담 어르신'}
               clientId={targetClientId || selectedClient?.id || clients[0]?.id || 'client-1'}
+              currentDocumentType={documentType}
               defaultDocType={documentType}
               onApplyMappedDraftToForm={handleApplyRealtimeSummaryDraftToForm}
             />
@@ -3227,7 +3597,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                         onClick={() => {
                           const updated = [
                             ...(analysisResult.recommendedServices || []),
-                            { serviceName: '신규 지원 서비스', frequency: '주 1회', purpose: '일상 지원 및 안부 확인' },
+                            { category: '맞춤형서비스', serviceName: '신규 지원 서비스', frequency: '주 1회', purpose: '일상 지원 및 안부 확인' },
                           ];
                           setAnalysisResult({ ...analysisResult, recommendedServices: updated });
                         }}
@@ -3511,7 +3881,7 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                     <span className="text-[10px] text-stone-500">counselingPurpose</span>
                   </div>
                   <p className="text-[11px] text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-900 p-2 rounded-lg border border-stone-200/80 dark:border-stone-800 leading-relaxed font-sans">
-                    {analysisResult?.threeLineSummary[0] || '어르신 생활 및 건강 상태 정기 모니터링, 주요 욕구 및 위험 요인 파악'}
+                    {analysisResult ? generateThreeLineSummary(analysisResult)[0] : '어르신 생활 및 건강 상태 정기 모니터링, 주요 욕구 및 위험 요인 파악'}
                   </p>
                 </div>
 
@@ -3527,18 +3897,18 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                         <div className="font-semibold text-amber-900 dark:text-amber-200">
                           [1. 상담 요약 및 어르신 호소]
                         </div>
-                        <div>{analysisResult.threeLineSummary.join('\n')}</div>
+                        <div>{generateThreeLineSummary(analysisResult).join('\n')}</div>
 
                         <div className="font-semibold text-amber-900 dark:text-amber-200 pt-1">
                           [2. 발화 핵심 이슈 및 사정 결과]
                         </div>
                         <div>• 위기도: {analysisResult.riskLevel}</div>
-                        <div>• 주요 이슈: {analysisResult.keyIssues.join(', ')}</div>
+                        <div>• 주요 이슈: {(analysisResult.primaryNeeds || []).join(', ')}</div>
 
                         <div className="font-semibold text-amber-900 dark:text-amber-200 pt-1">
                           [3. 사회복지사 의견 및 추천 조치]
                         </div>
-                        <div>{analysisResult.recommendedService}</div>
+                        <div>{analysisResult.recommendedServices?.[0]?.serviceName || analysisResult.socialWorkerOpinion || '맞춤형 재가노인지원서비스'}</div>
                       </>
                     ) : (
                       transcriptText.slice(0, 300) || '상담 대화 내용'
@@ -3683,6 +4053,111 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 🌟 Real-time Voice Consultation Quick Summary Floating Tip */}
+      {quickSummaryTip && (
+        <div
+          id="quick-summary-floating-tip"
+          className="fixed bottom-6 right-6 z-50 max-w-md w-[92vw] sm:w-[440px] bg-white dark:bg-[#1E1916] rounded-2xl border-2 border-amber-400 dark:border-amber-600 shadow-2xl p-4 sm:p-5 space-y-3 transition-all animate-in slide-in-from-bottom-5 duration-200 backdrop-blur-md"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-2 border-b border-amber-200/80 dark:border-amber-900/60 pb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-amber-500 text-white shadow-xs">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                    실시간 상담 퀵 요약 (Quick Summary)
+                  </h4>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                    Gemini 3.8
+                  </span>
+                </div>
+                <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                  대상: <strong>{quickSummaryTip.clientName}</strong> 어르신 · {quickSummaryTip.time}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleGenerateQuickSummary}
+                disabled={isGeneratingQuickSummary}
+                className="p-1.5 text-stone-500 hover:text-amber-600 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer"
+                title="진행 중인 최신 녹취로 다시 요약"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingQuickSummary ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickSummaryTip(null)}
+                className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer"
+                title="플로팅 팁 닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* One-paragraph Content Card */}
+          <div className="bg-amber-50/70 dark:bg-amber-950/40 rounded-xl p-3 border border-amber-200/80 dark:border-amber-900/50">
+            <p className="text-xs text-stone-800 dark:text-stone-200 leading-relaxed font-normal">
+              {quickSummaryTip.text}
+            </p>
+          </div>
+
+          {/* Footer Actions */}
+          <div className="flex items-center justify-between gap-2 pt-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setTranscriptText((prev) =>
+                  prev
+                    ? `${prev}\n\n[Gemini 1문단 퀵 요약 - ${quickSummaryTip.time}]\n${quickSummaryTip.text}`
+                    : `[Gemini 1문단 퀵 요약 - ${quickSummaryTip.time}]\n${quickSummaryTip.text}`
+                );
+                setQuickSummaryNotification('녹취록에 1문단 퀵 요약이 주석으로 추가되었습니다.');
+                setTimeout(() => setQuickSummaryNotification(null), 3000);
+              }}
+              className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              <span>녹취록에 반영</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(quickSummaryTip.text);
+                setQuickSummaryCopied(true);
+                setTimeout(() => setQuickSummaryCopied(false), 2000);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 text-stone-700 dark:text-stone-200 text-[11px] font-bold border border-stone-300 dark:border-stone-700 transition-colors cursor-pointer"
+            >
+              {quickSummaryCopied ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span className="text-emerald-700 font-bold">복사됨</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  <span>요약 복사</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {quickSummaryNotification && (
+            <div className="text-[10px] text-emerald-700 dark:text-emerald-300 font-medium bg-emerald-50 dark:bg-emerald-950/60 p-1.5 rounded border border-emerald-300 dark:border-emerald-800">
+              {quickSummaryNotification}
+            </div>
+          )}
         </div>
       )}
     </div>

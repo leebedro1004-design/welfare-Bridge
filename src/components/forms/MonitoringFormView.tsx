@@ -1,11 +1,13 @@
 import React from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
+import { resolveDocumentAuthor } from '../../utils/userSettingsHelper';
 import { Eye, CheckCircle2, Sparkles, MessageSquare, Target, FileText } from 'lucide-react';
 import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,13 +16,14 @@ interface FormProps {
 export const MonitoringFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,
 }) => {
   const fields = doc.formSpecificFields || {};
   const isAutoFilled = Boolean(fields.counselingPurpose || fields.counselingContent || fields.aiAutoFilledTimestamp);
-  const scores: Record<string, number> = fields.monitoringSatisfactionScores || {
+  const scores: Record<string, any> = fields.monitoringSatisfactionScores || {
     q1: 5,
     q2: 5,
     q3: 5,
@@ -108,7 +111,7 @@ export const MonitoringFormView: React.FC<FormProps> = ({
           <input
             type="text"
             disabled={readOnly}
-            value={doc.author || '이상호 사회복지사'}
+            value={resolveDocumentAuthor(doc.author, userSettings)}
             onChange={(e) => onChange('author', e.target.value)}
             className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32 font-medium"
           />

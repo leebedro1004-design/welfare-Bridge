@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { CaseDocument, DocumentType } from '../types';
 import { DOCUMENT_TYPE_LABELS } from '../utils/documentTemplates';
+import { getContextualFieldAlternatives, getFieldEvidenceQuote } from '../utils/aiAlternativesHelper';
 
 export interface AICollaborationReviewItem {
   id: string;
@@ -15,6 +16,7 @@ export interface AICollaborationReviewItem {
   aiDraft: string;
   confidence: number; // 0 ~ 100
   rationale: string; // 근거 문구
+  evidenceQuote?: string; // 실제 상담 발화 인용문
   suggestedAlternatives?: string[];
   status: 'accepted' | 'modified' | 'pending';
 }
@@ -47,104 +49,141 @@ export const AIHumanCollaborationMode: React.FC<AIHumanCollaborationModeProps> =
       aiDraft: document.title || '',
       confidence: 98,
       rationale: '대상자 성명, 서식 유형 및 사정 작성일자를 공문서 표준 네이밍 규칙에 맞추어 생성',
-      suggestedAlternatives: [
-        `${document.clientName} 어르신 2026년 정기 ${DOCUMENT_TYPE_LABELS[document.documentType].short}`,
-        `[긴급] ${document.clientName} 어르신 위기사례 개입 ${DOCUMENT_TYPE_LABELS[document.documentType].short}`,
-      ],
+      evidenceQuote: getFieldEvidenceQuote('title', document),
+      suggestedAlternatives: getContextualFieldAlternatives('title', document),
       status: 'pending',
     });
 
-    // 2. Risk rationale
+    // 2. Legal Pre-fill: Counseling Purpose / Problem & Needs
+    const purposeDraft = document.formSpecificFields?.counselingPurpose ||
+      document.formSpecificFields?.problemAndNeeds ||
+      (document.primaryNeeds && document.primaryNeeds.length > 0
+        ? `${document.clientName || '내담자'} 어르신의 핵심 욕구(${document.primaryNeeds.slice(0, 3).join(', ')}) 해결 및 안전한 재가생활 유지`
+        : '');
+    if (purposeDraft) {
+      items.push({
+        id: 'item-counselingPurpose',
+        fieldKey: document.formSpecificFields?.counselingPurpose ? 'formSpecificFields.counselingPurpose' : 'formSpecificFields.problemAndNeeds',
+        label: '상담 목적 / 핵심 욕구 (법정서식)',
+        category: '욕구·소견',
+        aiDraft: purposeDraft,
+        confidence: 96,
+        rationale: '상담 대화록에서 추출된 어르신의 핵심 욕구와 재가노인지원서비스 개입 목적을 결합하여 생성',
+        evidenceQuote: getFieldEvidenceQuote('counselingPurpose', document) || getFieldEvidenceQuote('problemAndNeeds', document),
+        suggestedAlternatives: getContextualFieldAlternatives('counselingPurpose', document),
+        status: 'pending',
+      });
+    }
+
+    // 3. Legal Pre-fill: Counseling Content / Intake Summary
+    const contentDraft = document.formSpecificFields?.counselingContent ||
+      document.formSpecificFields?.intakeSummary ||
+      (document.executiveSummary && document.executiveSummary.length > 0
+        ? document.executiveSummary.map((s) => `• ${s}`).join('\n')
+        : '');
+    if (contentDraft) {
+      items.push({
+        id: 'item-counselingContent',
+        fieldKey: document.formSpecificFields?.counselingContent ? 'formSpecificFields.counselingContent' : 'formSpecificFields.intakeSummary',
+        label: '상담 내용 요약 / 면담 기록 (법정서식)',
+        category: '욕구·소견',
+        aiDraft: contentDraft,
+        confidence: 95,
+        rationale: '실제 상담 녹취 대화 전문을 5단계 표준 영역(개요, ADL, 정서, 욕구, 조치계획)으로 구조화하여 미리 채워넣은 내용',
+        evidenceQuote: getFieldEvidenceQuote('counselingContent', document),
+        suggestedAlternatives: getContextualFieldAlternatives('counselingContent', document),
+        status: 'pending',
+      });
+    }
+
+    // 4. Risk rationale
     if (document.riskRationale || document.riskLevel) {
       items.push({
         id: 'item-riskRationale',
         fieldKey: 'riskRationale',
         label: '위기도 종합 판정 근거',
         category: '기본·인적',
-        aiDraft: document.riskRationale || `${document.riskLevel} 판정: 고령 독거, 만성질환 및 결식 위험 복합 작용`,
+        aiDraft: document.riskRationale || `${document.riskLevel} 판정: 고령 독거, 만성질환 및 안전 취약 복합 작용`,
         confidence: 94,
         rationale: '클라이언트 건강 상태 및 경제·주거 취약요인 가중치 분석 결과',
-        suggestedAlternatives: [
-          '만성 퇴행성 관절염 및 독거로 인한 일상생활 자립 제한 및 결식 고위험군',
-          '기초생활수급자 독거노인으로서 주거환경 노후화 및 사회적 지지망 부재',
-        ],
+        evidenceQuote: getFieldEvidenceQuote('riskRationale', document),
+        suggestedAlternatives: getContextualFieldAlternatives('riskRationale', document),
         status: 'pending',
       });
     }
 
-    // 3. Physical Health Status
+    // 5. Physical Health Status
     items.push({
       id: 'item-physicalHealthStatus',
       fieldKey: 'physicalHealthStatus',
       label: '신체건강 및 ADL/IADL 상태',
       category: '신체·건강',
-      aiDraft: document.physicalHealthStatus || '무릎 관절염 및 고혈압 투약 중. 보행 시 지팡이 사용하며 식사 준비에 어려움 호소.',
+      aiDraft: document.physicalHealthStatus || (getFieldEvidenceQuote('physicalHealthStatus', document)
+        ? `[상담 발화 기반] "${getFieldEvidenceQuote('physicalHealthStatus', document)}" 증상 호소에 따른 신체 기능 점검 필요.`
+        : '상담 중 호소한 신체 증상, 복약 및 보행/식사 일상수행능력(ADL) 점검 요망.'),
       confidence: 92,
-      rationale: '상담 대화 중 호소한 신체 증상, 복약 및 보행/식사 일상수행능력(ADL) 추출',
-      suggestedAlternatives: [
-        '양측 퇴행성 무릎 관절염으로 계단 보행 및 장거리 외출 제한, 정기적 병원 동행 필요',
-        '치아 결손 및 소화기능 저하로 연식 위주의 균형 잡힌 영양 식단 공급이 시급함',
-      ],
+      rationale: '상담 대화 중 어르신이 직접 발언한 신체 증상, 복약 및 보행/식사 일상수행능력(ADL) 추출',
+      evidenceQuote: getFieldEvidenceQuote('physicalHealthStatus', document),
+      suggestedAlternatives: getContextualFieldAlternatives('physicalHealthStatus', document),
       status: 'pending',
     });
 
-    // 4. Emotional / Cognitive Status
+    // 6. Emotional / Cognitive Status
     items.push({
       id: 'item-emotionalCognitiveStatus',
       fieldKey: 'emotionalCognitiveStatus',
       label: '정서·심리 및 인지 기능 상태',
       category: '정서·환경',
-      aiDraft: document.emotionalCognitiveStatus || '시간/장소 지남력은 양호하나 배우자 사별 후 사회적 고립감과 가벼운 무기력감 표출.',
+      aiDraft: document.emotionalCognitiveStatus || (getFieldEvidenceQuote('emotionalCognitiveStatus', document)
+        ? `[상담 발화 기반] "${getFieldEvidenceQuote('emotionalCognitiveStatus', document)}" 진술을 통한 독거 정서 심리 상태 파악.`
+        : '시간/장소 지남력은 양호하며 독거 생활에 따른 정서적 안정 지원 필요.'),
       confidence: 89,
-      rationale: '지남력 문답 및 독거로 인한 우울감/외로움 척도(SGDS-K 연계) 분석',
-      suggestedAlternatives: [
-        '인지기능은 명확하나 외부 교류 단절로 인한 우울 점수 경계선(정기 말벗 정서지지 필요)',
-        '단기 기억력 양호, 이웃과의 왕래가 적어 말벗 봉사자 정기 방문 결연 권장',
-      ],
+      rationale: '지남력 문답 및 독거로 인한 우울감/외로움 발화 분석',
+      evidenceQuote: getFieldEvidenceQuote('emotionalCognitiveStatus', document),
+      suggestedAlternatives: getContextualFieldAlternatives('emotionalCognitiveStatus', document),
       status: 'pending',
     });
 
-    // 5. Housing / Environment
+    // 7. Housing / Environment
     items.push({
       id: 'item-housingEnvironment',
       fieldKey: 'housingEnvironment',
       label: '주거 환경 및 안전 위협 요인',
       category: '정서·환경',
-      aiDraft: document.housingEnvironment || '노후 다세대주택 거주. 화장실 문턱 높고 안전손잡이 부재로 낙상 위험 상존.',
+      aiDraft: document.housingEnvironment || (getFieldEvidenceQuote('housingEnvironment', document)
+        ? `[상담 발화 기반] "${getFieldEvidenceQuote('housingEnvironment', document)}" 거주 위해요소 점검 및 안전 지원 요망.`
+        : '주거 형태, 난방, 화장실 등 실내 위해요소 안전 확인 필요.'),
       confidence: 91,
       rationale: '주거 형태, 난방, 화장실 문턱 등 낙상 안전 위해요소 사정 기록 추출',
-      suggestedAlternatives: [
-        '화장실 미끄럼 방지 매트 및 L자형 벽면 안전손잡이 긴급 설치 지원 필요',
-        '싱크대 수전 누수 및 동절기 외풍 차단을 위한 단열 에어캡 시공 요망',
-      ],
+      evidenceQuote: getFieldEvidenceQuote('housingEnvironment', document),
+      suggestedAlternatives: getContextualFieldAlternatives('housingEnvironment', document),
       status: 'pending',
     });
 
-    // 6. Social Worker Opinion
+    // 8. Social Worker Opinion
     items.push({
       id: 'item-socialWorkerOpinion',
       fieldKey: 'socialWorkerOpinion',
       label: '사회복지사 종합 사정 소견',
       category: '욕구·소견',
-      aiDraft: document.socialWorkerOpinion || '식생활 개선을 위한 밑반찬 배달과 주 1회 안부확인, 낙상예방 안전바 설치를 포함한 통합 사례관리 개입이 시급함.',
+      aiDraft: document.socialWorkerOpinion || `${document.clientName || '내담자'} 어르신의 확인된 핵심 욕구를 중심으로 맞춤형 재가노인지원서비스 개입 및 정기 모니터링이 요구됨.`,
       confidence: 96,
       rationale: '보건복지부 재가노인지원서비스 8대 핵심영역 연계 표준 소견 문안 구성',
-      suggestedAlternatives: [
-        '경제적·신체적 취약도가 높은 고위험 독거노인으로서 즉시 사례관리형 대상자로 선정하여 다각적 자원 연계가 필수적임.',
-        '결식 예방과 일상생활 잔존기능 유지를 최우선 목표로 설정하고 주기적 모니터링을 통한 안전망 구축 요망.',
-      ],
+      evidenceQuote: getFieldEvidenceQuote('socialWorkerOpinion', document),
+      suggestedAlternatives: getContextualFieldAlternatives('socialWorkerOpinion', document),
       status: 'pending',
     });
 
-    // 7. Goals
+    // 9. Goals
     items.push({
       id: 'item-shortTermGoals',
       fieldKey: 'shortTermGoals',
       label: '단기 개입 목표',
       category: '서비스계획',
-      aiDraft: Array.isArray(document.shortTermGoals) ? document.shortTermGoals.join('\n• ') : (document.shortTermGoals || '결식 예방 밑반찬 배달\n• 주 1회 방문 안부확인'),
+      aiDraft: Array.isArray(document.shortTermGoals) ? document.shortTermGoals.join('\n• ') : (document.shortTermGoals || '정기 방문 안부확인 및 일상생활 자립 지원'),
       confidence: 90,
       rationale: '초기 1~3개월 내 달성 가능한 구체적 행동 지표',
+      suggestedAlternatives: getContextualFieldAlternatives('shortTermGoals', document),
       status: 'pending',
     });
 
@@ -377,7 +416,7 @@ export const AIHumanCollaborationMode: React.FC<AIHumanCollaborationModeProps> =
                 </div>
 
                 {/* AI Rationale & Grounding Box */}
-                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-300/80 dark:border-amber-800/60 space-y-1.5">
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-300/80 dark:border-amber-800/60 space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
                     <Bot className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                     <span>AI 초안 생성 근거 및 사정 사유</span>
@@ -385,6 +424,18 @@ export const AIHumanCollaborationMode: React.FC<AIHumanCollaborationModeProps> =
                   <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed pl-5">
                     {activeItem.rationale}
                   </p>
+
+                  {activeItem.evidenceQuote && (
+                    <div className="mt-2 p-2.5 rounded-lg bg-white/90 dark:bg-stone-900/80 border border-amber-300 dark:border-amber-800/80 text-xs">
+                      <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300 font-bold text-[11px] mb-0.5">
+                        <span>🎙️ 실제 상담 대화록 발화 인용</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium">원문 팩트 기반</span>
+                      </div>
+                      <p className="text-stone-800 dark:text-stone-200 italic pl-1 border-l-2 border-amber-500 leading-relaxed">
+                        "{activeItem.evidenceQuote}"
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Editable Draft Area */}

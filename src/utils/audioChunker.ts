@@ -184,6 +184,45 @@ export function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
+ * Quickly probes audio duration via HTMLAudioElement without decoding into memory
+ */
+export function getAudioDurationViaHtmlAudio(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const audio = new Audio();
+      audio.preload = 'metadata';
+      const cleanUp = () => {
+        audio.removeEventListener('loadedmetadata', onLoaded);
+        audio.removeEventListener('error', onError);
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      };
+      const onLoaded = () => {
+        const d = audio.duration;
+        cleanUp();
+        resolve(isFinite(d) && d > 0 ? d : 0);
+      };
+      const onError = () => {
+        cleanUp();
+        resolve(0);
+      };
+      audio.addEventListener('loadedmetadata', onLoaded);
+      audio.addEventListener('error', onError);
+      audio.src = url;
+      // Fallback timeout after 1.5 seconds if metadata event doesn't fire
+      setTimeout(() => {
+        cleanUp();
+        resolve(0);
+      }, 1500);
+    } catch {
+      resolve(0);
+    }
+  });
+}
+
+/**
  * Decodes an audio file and slices it into optimized chunks for Gemini STT
  * - Max chunk duration: 360 seconds (6 minutes)
  * - 6 minutes of 16kHz mono WAV is ~11.5MB (Base64 ~15.3MB)
@@ -200,6 +239,11 @@ export async function prepareOptimizedAudioChunks(
   totalDurationSec: number;
   isChunked: boolean;
 }> {
+  // Allow browser Web Audio API decoding for files up to 200MB (supporting ~2 hours of AAC/MP3)
+  if (file.size > 200 * 1024 * 1024) {
+    throw new Error('200MB 초과 초대용량 파일은 브라우저 메모리 보호를 위해 분할 압축 후 시도해 주세요.');
+  }
+
   const chunkDurationSec = options?.chunkDurationSec || 360; // 6 minutes per chunk
   const onProgress = options?.onProgress;
 

@@ -83,6 +83,9 @@ export interface ClientProfile {
   status: '진행중' | '집중관리' | '모니터링' | '종결';
   profileImage?: string;
   familyMembers?: FamilyMember[];
+  livingArrangement?: string;
+  assignedWorker?: string;
+  specialNotes?: string;
 }
 
 export interface DocumentAuditResult {
@@ -137,6 +140,7 @@ export interface VisitRoutePlan {
   totalClients: number;
   totalDistanceKm: number;
   estimatedTotalMinutes: number;
+  totalEstimatedMinutes?: number;
   items: VisitRouteItem[];
   workerName: string;
   transportMode: '도보' | '차량' | '대중교통';
@@ -178,6 +182,8 @@ export interface CaseDocument {
   riskLevel?: RiskLevel;
   riskRationale?: string;
   primaryNeeds?: string[];
+  evidenceQuotes?: Record<string, string>;
+  contextualAlternatives?: Record<string, string[]>;
   
   // Specific Form Fields
   physicalHealthStatus?: string;
@@ -192,6 +198,12 @@ export interface CaseDocument {
   recommendedServices?: RecommendedService[];
   shortTermGoals?: string[];
   longTermGoals?: string[];
+  
+  // Custom form presets and scoring shortcuts
+  adlScores?: any;
+  iadlScores?: any;
+  depressionScore?: number;
+  servicePlanItems?: any[];
   
   // Sub-type specific fields matching official 10-step PDF forms
   formSpecificFields?: {
@@ -211,6 +223,11 @@ export interface CaseDocument {
     notesFamily?: string;
     notesLiving?: string;
     notesHealth?: string;
+    intakeSummary?: string;
+    intakeClientEmotion?: string;
+    intakeHealthStatus?: string;
+    intakeHousingSafety?: string;
+    intakeCounselorOpinion?: string;
 
     // 2. 사정기록지 세부
     consultationMethod?: '방문' | '내방' | '전화' | '서신';
@@ -327,8 +344,10 @@ export interface CaseDocument {
     monitoringNumber?: string;
     monitoringType?: '최초' | '정기';
     monitoringMethod?: '방문' | '유선' | '내방';
+    monitoringSummary?: string; // 모니터링 요약 (상담 요약)
     counselingPurpose?: string; // 상담 목적 (AI 서식 자동 완성 매핑 대상 필드)
     counselingContent?: string; // 상담 내용 (AI 서식 자동 완성 매핑 대상 필드)
+    counselingMethod?: string; // 상담 방법 (방문상담 / 전화상담 등)
     counselingCategory?: string; // 상담 구분 (정기상담 / 초기상담 / 위기상담 등)
     counselingNextPlan?: string; // 상담 후 조치 계획
     aiAutoFilledFields?: string[]; // AI 서식 자동 완성으로 채워진 필드 목록
@@ -339,7 +358,8 @@ export interface CaseDocument {
       serviceGuideAccuracy?: string;
       lifeHelpEffectiveness?: string;
       workerSatisfaction?: string;
-    };
+      [key: string]: any;
+    } | Record<string, number | string>;
     monitoringNeedChanges?: string;
     monitoringEnvironmentChanges?: string;
     monitoringComplaints?: string;
@@ -394,6 +414,7 @@ export interface CaseDocument {
     referralReplySupportDecision?: string;
     referralReplyStartDate?: string;
     referralReplyScore?: number | string;
+    [key: string]: any;
   };
 }
 
@@ -417,7 +438,33 @@ export interface AIAnalysisResponse {
   recommendedServices: RecommendedService[];
   shortTermGoals?: string[];
   longTermGoals?: string[];
+  evidenceQuotes?: Record<string, string>; // 실제 상담 대화록에서 발화된 근거 구절 인용
+  contextualAlternatives?: Record<string, string[]>; // 해당 내담자 고유 맥락에 맞춘 대안 문구 추천
   formSpecificFields?: {
+    // 공통 및 상담일지
+    counselingPurpose?: string;
+    counselingContent?: string;
+    counselingMethod?: string;
+    counselingCategory?: string;
+    counselingNextPlan?: string;
+    // 초기면접지
+    intakeSummary?: string;
+    intakeClientEmotion?: string;
+    intakeHealthStatus?: string;
+    intakeHousingSafety?: string;
+    intakeCounselorOpinion?: string;
+    // 종합사정기록지
+    assessmentNeeds?: string;
+    assessmentAdlSummary?: string;
+    assessmentEmotional?: string;
+    assessmentEnvironment?: string;
+    assessmentOverallPlan?: string;
+    // 서비스제공계획서
+    problemAndNeeds?: string;
+    longTermGoal?: string;
+    shortTermGoal?: string;
+    servicePlanManagerOpinion?: string;
+    // 사례회의 및 모니터링/종결
     conferenceTopic?: string;
     conferenceDiscussion?: string;
     conferenceDecision?: string;
@@ -426,6 +473,7 @@ export interface AIAnalysisResponse {
     terminationReason?: string;
     goalAchievementRate?: string;
     followUpPlan?: string;
+    [key: string]: any;
   };
 }
 
@@ -453,6 +501,14 @@ export interface SyncHistoryItem {
   folderName: string;
   message: string;
   triggerType: 'scheduled' | 'manual' | 'auto_save';
+  errorDetails?: {
+    code?: string;
+    reason?: string;
+    endpoint?: string;
+    suggestedFix?: string;
+    rawResponse?: string;
+    details?: string;
+  };
 }
 
 export interface UserSettings {

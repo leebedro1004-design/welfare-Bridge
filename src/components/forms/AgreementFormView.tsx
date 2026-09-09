@@ -1,11 +1,12 @@
 import React from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
 import { ShieldCheck, FileCheck, CheckSquare, Lock } from 'lucide-react';
 import { CheckboxToggle } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,6 +15,7 @@ interface FormProps {
 export const AgreementFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,

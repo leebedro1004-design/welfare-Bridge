@@ -1,11 +1,13 @@
 import React from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
+import { resolveDocumentAuthor } from '../../utils/userSettingsHelper';
 import { Layers, ShieldCheck, Plus, Trash2 } from 'lucide-react';
 import { CheckboxToggle } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,6 +16,7 @@ interface FormProps {
 export const ServicePlanFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,
@@ -97,7 +100,7 @@ export const ServicePlanFormView: React.FC<FormProps> = ({
             <input
               type="text"
               disabled={readOnly}
-              value={doc.author || '이상호 사회복지사'}
+              value={resolveDocumentAuthor(doc.author, userSettings)}
               onChange={(e) => onChange('author', e.target.value)}
               className="p-1 border rounded bg-stone-50 dark:bg-[#251E1A] text-xs w-32 font-medium"
             />

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { CaseDocument, ClientProfile } from '../../types';
+import { CaseDocument, ClientProfile, UserSettings } from '../../types';
+import { getEffectiveAgencyName } from '../../utils/userSettingsHelper';
 import { Award, FileText, CheckCircle2, TrendingUp, AlertCircle, ArrowRight } from 'lucide-react';
 import { CheckboxToggle, RadioToggleGroup } from './FormControls';
 
 interface FormProps {
   doc: CaseDocument;
   client?: ClientProfile;
+  userSettings?: UserSettings;
   onChange: (field: keyof CaseDocument, value: any) => void;
   onSpecificChange: (field: string, value: any) => void;
   readOnly?: boolean;
@@ -14,6 +16,7 @@ interface FormProps {
 export const TerminationFormView: React.FC<FormProps> = ({
   doc,
   client,
+  userSettings,
   onChange,
   onSpecificChange,
   readOnly = false,
@@ -96,7 +99,7 @@ export const TerminationFormView: React.FC<FormProps> = ({
               <input
                 type="text"
                 disabled={readOnly}
-                value={fields.issuingOrg || '굿실버노인복지센터'}
+                value={fields.issuingOrg?.includes('굿실버') ? fields.issuingOrg.replace('굿실버노인복지센터', getEffectiveAgencyName(userSettings)) : (fields.issuingOrg || getEffectiveAgencyName(userSettings))}
                 onChange={(e) => onSpecificChange('issuingOrg', e.target.value)}
                 className="p-1 border rounded bg-white dark:bg-[#1E1916] text-xs w-32"
               />

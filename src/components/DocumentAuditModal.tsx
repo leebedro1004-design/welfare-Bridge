@@ -25,7 +25,8 @@ interface DocumentAuditModalProps {
   onClose: () => void;
   document: CaseDocument;
   client?: ClientProfile | null;
-  onApplyFix: (updatedDoc: CaseDocument) => void;
+  onApplyFix?: (updatedDoc: CaseDocument) => void;
+  onApplyRefinement?: (field: any, text: any) => void;
 }
 
 export const DocumentAuditModal: React.FC<DocumentAuditModalProps> = ({
@@ -34,6 +35,7 @@ export const DocumentAuditModal: React.FC<DocumentAuditModalProps> = ({
   document,
   client,
   onApplyFix,
+  onApplyRefinement,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [auditResult, setAuditResult] = useState<DocumentAuditResult | null>(null);
@@ -183,7 +185,12 @@ export const DocumentAuditModal: React.FC<DocumentAuditModalProps> = ({
       (updated as any)[fieldName] = suggestedValue;
     }
 
-    onApplyFix(updated);
+    if (onApplyFix) {
+      onApplyFix(updated);
+    }
+    if (onApplyRefinement) {
+      onApplyRefinement(fieldName, suggestedValue);
+    }
     setAppliedFixes((prev) => ({ ...prev, [fieldName]: true }));
   };
 
@@ -195,10 +202,12 @@ export const DocumentAuditModal: React.FC<DocumentAuditModalProps> = ({
     if (typeof currentValue === 'string') {
       // Replace instance
       (updated as any)[fieldName] = currentValue.replace(original, suggested);
-      onApplyFix(updated);
+      if (onApplyFix) onApplyFix(updated);
+      if (onApplyRefinement) onApplyRefinement(fieldName, (updated as any)[fieldName]);
     } else if (fieldName === 'socialWorkerOpinion' && !currentValue) {
       updated.socialWorkerOpinion = suggested;
-      onApplyFix(updated);
+      if (onApplyFix) onApplyFix(updated);
+      if (onApplyRefinement) onApplyRefinement(fieldName, suggested);
     }
 
     setAppliedReplacements((prev) => ({ ...prev, [index]: true }));
@@ -236,7 +245,7 @@ export const DocumentAuditModal: React.FC<DocumentAuditModalProps> = ({
       }
     });
 
-    onApplyFix(updated);
+    if (onApplyFix) onApplyFix(updated);
 
     // Mark all as done
     const newFixes: Record<string, boolean> = {};

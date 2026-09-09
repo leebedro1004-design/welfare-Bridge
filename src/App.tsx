@@ -703,6 +703,11 @@ export default function App() {
               onSelectClientForForm={handleSelectClientForForm}
               onNewClientRegister={() => setIsNewClientModalOpen(true)}
               onOpenMajorFormsModal={() => setIsMajorFormsModalOpen(true)}
+              onUpdateClientRiskLevel={(cId, newRisk) => {
+                setClients((prev) =>
+                  prev.map((c) => (c.id === cId ? { ...c, riskLevel: newRisk } : c))
+                );
+              }}
             />
           )}
 
@@ -846,6 +851,7 @@ export default function App() {
               clients={clients}
               userSettings={userSettings}
               onSaveDocument={handleSaveDocument}
+              consultationInsights={liveInsights}
             />
           )}
 
@@ -897,6 +903,8 @@ export default function App() {
           {activeTab === 'archive' && (
             <DocumentArchive
               documents={documents}
+              clients={clients}
+              userSettings={userSettings}
               onOpenDocument={handleOpenDocumentFromArchive}
               onDeleteDocument={handleDeleteDocument}
             />
@@ -936,6 +944,8 @@ export default function App() {
           setIsSettingsOpen(false);
           setIsSchedulerModalOpen(true);
         }}
+        documents={documents}
+        clients={clients}
       />
 
       {/* Cloud Auto Sync Scheduler Modal */}
@@ -943,10 +953,12 @@ export default function App() {
         isOpen={isSchedulerModalOpen}
         onClose={() => setIsSchedulerModalOpen(false)}
         userSettings={userSettings}
-        onUpdateSettings={handleSaveSettings}
-        user={googleUser}
+        onUpdateUserSettings={handleSaveSettings}
+        googleUser={googleUser}
         onSignInWithGoogle={handleSignInWithGoogle}
-        onTriggerImmediateSync={() => handleBackupToDrive('manual')}
+        documents={documents}
+        clients={clients}
+        onTriggerSyncNow={() => handleBackupToDrive('manual')}
         isSyncing={isBackingUpToDrive}
       />
 
@@ -974,7 +986,7 @@ export default function App() {
           handleSelectClientForForm(newClient, 'intake');
         }}
         agencyName={userSettings.agencyName || userSettings.institutionName || '사회복지시설 사례관리팀'}
-        workerName={userSettings.workerName || userSettings.defaultWorkerName || googleUser?.name || '사회복지사'}
+        workerName={userSettings.workerName || (userSettings as any).defaultWorkerName || googleUser?.name || '사회복지사'}
       />
 
       {/* Major Legal Forms Quick Modal Launcher (주요 법정 서식 빠른 런처 모달) */}
@@ -982,7 +994,7 @@ export default function App() {
         isOpen={isMajorFormsModalOpen}
         onClose={() => setIsMajorFormsModalOpen(false)}
         clients={clients}
-        onSelectForm={(docType, targetClient) => {
+        onSelectFormAndClient={(docType, targetClient) => {
           const client = targetClient || clients[0];
           handleSelectClientForForm(client, docType);
         }}
