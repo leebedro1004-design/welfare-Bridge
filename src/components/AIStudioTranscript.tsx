@@ -44,11 +44,12 @@ import {
   X,
   Activity,
   FileCheck,
+  FileCheck2,
   UploadCloud,
   FileSpreadsheet,
   Target,
 } from 'lucide-react';
-import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight } from '../types';
+import { DocumentType, ClientProfile, PresetScenario, AIAnalysisResponse, CaseDocument, ConsultationInsight, UserSettings } from '../types';
 import { DOCUMENT_TYPE_LABELS, mapAiResponseToDocument, createEmptyDocument } from '../utils/documentTemplates';
 import {
   validateAudioFile,
@@ -71,6 +72,7 @@ import { CONSULTATION_STAGES, ConsultationStage } from '../data/consultationGuid
 import { CounselingSentimentTrendChart } from './CounselingSentimentTrendChart';
 import { AIFormWizardStepView } from './AIFormWizardStepView';
 import { AIRealtimeSummaryCard } from './AIRealtimeSummaryCard';
+import { CounselingDocAutoSaveModal } from './CounselingDocAutoSaveModal';
 import confetti from 'canvas-confetti';
 
 export interface KeySegmentBookmark {
@@ -86,6 +88,9 @@ interface AIStudioTranscriptProps {
   onGenerateDocument: (doc: CaseDocument) => void;
   selectedClient?: ClientProfile | null;
   onPushInsightToDashboard?: (insight: ConsultationInsight) => void;
+  initialTranscript?: string;
+  userSettings?: UserSettings;
+  onSaveDraftDocument?: (doc: CaseDocument) => void;
 }
 
 export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
@@ -93,17 +98,30 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   onGenerateDocument,
   selectedClient,
   onPushInsightToDashboard,
+  initialTranscript,
+  userSettings,
+  onSaveDraftDocument,
 }) => {
   // Navigation / Mode state
   const [activeMainTab, setActiveMainTab] = useState<'transcript' | 'wizard' | 'guide'>('transcript');
 
   // Input states
-  const [transcriptText, setTranscriptText] = useState<string>('');
+  const [transcriptText, setTranscriptText] = useState<string>(() => initialTranscript || '');
   const [documentType, setDocumentType] = useState<DocumentType>('intake');
   const [targetClientId, setTargetClientId] = useState<string>(selectedClient?.id || '');
   const [workerNotes, setWorkerNotes] = useState<string>('');
   const [scratchpadText, setScratchpadText] = useState<string>('');
   const [scratchpadCopied, setScratchpadCopied] = useState<boolean>(false);
+  const [summaryCopied, setSummaryCopied] = useState<boolean>(false);
+  const [summaryCopyToast, setSummaryCopyToast] = useState<string | null>(null);
+
+  // Sync initialTranscript prop if updated from outside (e.g. practice mode scenario)
+  useEffect(() => {
+    if (initialTranscript) {
+      setTranscriptText(initialTranscript);
+    }
+  }, [initialTranscript]);
+
   const [focusAreas, setFocusAreas] = useState<string[]>([
     '식사/영양결식',
     '낙상/주거안전',
@@ -165,6 +183,100 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [micStatusMessage, setMicStatusMessage] = useState<string | null>(null);
   const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
 
+  // Real-time Streaming Risk Keyword Detection State (0.1초 고속 반응 최적화)
+  const lastAlertedKeywordRef = useRef<{ [keyword: string]: number }>({});
+  const [streamingRiskAlert, setStreamingRiskAlert] = useState<{
+    id: string;
+    keyword: string;
+    category: '정서/우울/자살' | '낙상/주거안전' | '영양결식/생계' | '응급의료' | '학대/방치의심';
+    severity: 'high' | 'urgent';
+    snippet: string;
+    timestamp: string;
+  } | null>(null);
+
+  // Streaming Keyword Detector Function (0.1초 이내 초고속 시각 경고 팝업 생성)
+  const checkStreamingRiskKeywords = (text: string) => {
+    if (!text || text.length < 2) return;
+    const now = Date.now();
+
+    const RISK_RULES: Array<{
+      category: '정서/우울/자살' | '낙상/주거안전' | '영양결식/생계' | '응급의료' | '학대/방치의심';
+      severity: 'high' | 'urgent';
+      keywords: string[];
+    }> = [
+      {
+        category: '정서/우울/자살',
+        severity: 'urgent',
+        keywords: ['죽고 싶', '죽을래', '살기 싫', '끝내고 싶', '자살', '약 먹고', '세상 떠나', '극단적', '목숨'],
+      },
+      {
+        category: '낙상/주거안전',
+        severity: 'high',
+        keywords: ['넘어졌', '쓰러졌', '미끄러', '엉덩방아', '화장실에서 넘', '바닥에 주저', '못 일어', '뼈가', '골절'],
+      },
+      {
+        category: '영양결식/생계',
+        severity: 'high',
+        keywords: ['밥 못', '굶었', '쌀이 없', '먹을 게 없', '끼니', '물만 마', '결식', '가스 끊', '전기 끊'],
+      },
+      {
+        category: '응급의료',
+        severity: 'urgent',
+        keywords: ['가슴 통증', '숨이 차', '숨을 못', '마비', '말이 안 나', '의식', '피가', '119', '응급'],
+      },
+      {
+        category: '학대/방치의심',
+        severity: 'urgent',
+        keywords: ['때려', '돈 뺏', '욕설', '가둬', '학대', '폭행', '내쫓', '밥 안 줘'],
+      },
+    ];
+
+    const windowText = text.slice(-200);
+    for (const rule of RISK_RULES) {
+      for (const kw of rule.keywords) {
+        if (windowText.includes(kw)) {
+          const lastTime = lastAlertedKeywordRef.current[kw] || 0;
+          if (now - lastTime > 12000) {
+            lastAlertedKeywordRef.current[kw] = now;
+
+            // Soft Web Audio chime
+            try {
+              const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+              if (AudioCtx) {
+                const audioCtx = new AudioCtx();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(rule.severity === 'urgent' ? 660 : 520, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.35);
+              }
+            } catch (e) {}
+
+            const kwIdx = windowText.indexOf(kw);
+            const start = Math.max(0, kwIdx - 20);
+            const end = Math.min(windowText.length, kwIdx + kw.length + 25);
+            const snippet = windowText.substring(start, end);
+
+            setStreamingRiskAlert({
+              id: `${kw}-${now}`,
+              keyword: kw,
+              category: rule.category,
+              severity: rule.severity,
+              snippet: snippet.trim(),
+              timestamp: new Date().toLocaleTimeString('ko-KR', { minute: '2-digit', second: '2-digit' }),
+            });
+            return;
+          }
+        }
+      }
+    }
+  };
+
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef<boolean>(false);
   const isPausedRef = useRef<boolean>(false);
@@ -204,7 +316,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           }
         }
         setInterimTranscript(interimChunk);
+        if (interimChunk) {
+          checkStreamingRiskKeywords(interimChunk);
+        }
         if (finalChunk) {
+          checkStreamingRiskKeywords(finalChunk);
           setTranscriptText((prev) => (prev ? prev + '\n' + finalChunk.trim() : finalChunk.trim()));
         }
       };
@@ -660,6 +776,10 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
   const [autoFillTargetDocType, setAutoFillTargetDocType] = useState<DocumentType>('monitoring');
   const [autoFillToast, setAutoFillToast] = useState<string | null>(null);
 
+  // Automatic Counseling Form ('상담기록지') Auto-Save & Guidance Modal State
+  const [lastAutoSavedCounselingDoc, setLastAutoSavedCounselingDoc] = useState<CaseDocument | null>(null);
+  const [isAutoSaveGuidanceModalOpen, setIsAutoSaveGuidanceModalOpen] = useState<boolean>(false);
+
   // Loaded Text Document State (for TXT, VTT, SRT, CSV imports)
   const [loadedTextDocMeta, setLoadedTextDocMeta] = useState<{
     name: string;
@@ -706,6 +826,55 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     const docLabel = DOCUMENT_TYPE_LABELS[targetType]?.short || '상담기록지';
     setAutoFillToast(`🎉 법정 서식 [${docLabel}]의 '상담 목적'과 '상담 내용' 필드에 AI 상담 분석 결과가 원클릭으로 자동 매핑되었습니다!`);
     setTimeout(() => setAutoFillToast(null), 5000);
+  };
+
+  // Automatically maps and temporarily saves consultation content to client's '상담기록지' (monitoring form) upon analysis completion
+  const executeAutoSaveCounselingDoc = (result: AIAnalysisResponse) => {
+    const targetClient = clients.find((c) => c.id === targetClientId) || selectedClient || clients[0];
+    const clientName = targetClient ? targetClient.name : '어르신';
+
+    const filledDoc = autoFillLegalFormWithConsultation({
+      transcript: transcriptText,
+      analysisResult: result,
+      client: targetClient,
+      targetDocType: 'monitoring',
+      userSettings,
+    });
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 5);
+
+    const autoSavedDoc: CaseDocument = {
+      ...filledDoc,
+      id: filledDoc.id || `doc-counseling-auto-${targetClient?.id || 'client'}-${Date.now()}`,
+      clientId: targetClient?.id || 'client-default',
+      clientName: clientName,
+      documentType: 'monitoring',
+      type: 'monitoring',
+      title: `${clientName} 어르신 상담기록지 (AI 자동연동)`,
+      status: '임시저장',
+      createdAt: `${dateStr} ${timeStr}`,
+      updatedAt: `${dateStr} ${timeStr}`,
+      author: userSettings?.workerName ? `${userSettings.workerName} 사회복지사` : filledDoc.author || '담당 사회복지사',
+    };
+
+    setLastAutoSavedCounselingDoc(autoSavedDoc);
+
+    if (onSaveDraftDocument) {
+      onSaveDraftDocument(autoSavedDoc);
+    }
+
+    try {
+      const saved = localStorage.getItem('senior_care_documents');
+      const parsed: CaseDocument[] = saved ? JSON.parse(saved) : [];
+      const filtered = parsed.filter((d) => d.id !== autoSavedDoc.id);
+      localStorage.setItem('senior_care_documents', JSON.stringify([autoSavedDoc, ...filtered]));
+    } catch (e) {
+      console.error('LocalStorage draft auto-save error:', e);
+    }
+
+    setIsAutoSaveGuidanceModalOpen(true);
   };
 
   // Helper to detect audio format
@@ -1345,6 +1514,48 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
     setTimeout(() => setScratchpadCopied(false), 2000);
   };
 
+  // 📋 요약 결과 클립보드 원클릭 복사 핸들러 (서식 및 보고서 작성용)
+  const handleCopySummaryResult = async () => {
+    if (!analysisResult) return;
+    const client = clients.find((c) => c.id === targetClientId) || selectedClient || clients[0];
+    const clientName = client?.name || '어르신';
+
+    const primaryNeedsList = analysisResult.primaryNeeds?.length
+      ? analysisResult.primaryNeeds.map((c, i) => `• ${c}`).join('\n')
+      : '특이 호소사항 없음';
+
+    const servicesList = analysisResult.recommendedServices?.length
+      ? analysisResult.recommendedServices.map((s, i) => `${i + 1}) [${s.category || '서비스'}] ${s.serviceName} (${s.frequency}): ${s.purpose}`).join('\n')
+      : '추천 서비스 없음';
+
+    const textToCopy = `[CareBridge AI 상담 분석 요약 브리핑]
+■ 대상자: ${clientName} (위기도: ${analysisResult.riskLevel})
+■ 분석 일시: ${new Date().toLocaleString('ko-KR')}
+■ 위기도 판정 근거: ${analysisResult.riskRationale || '신체 건강 및 주거 안전, 정서적 고립 위험 종합 판단'}
+
+[핵심 요약 브리핑]
+${analysisResult.executiveSummary?.map((s, i) => `${i + 1}. ${s}`).join('\n') || '요약 내용 없음'}
+
+[어르신 주요 욕구 및 호소]
+${primaryNeedsList}
+
+[사회복지사 종합 전문 소견]
+${analysisResult.socialWorkerOpinion || '해당 없음'}
+
+[우선 추천 조치 및 연계 서비스 계획]
+${servicesList}`.trim();
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setSummaryCopied(true);
+      setSummaryCopyToast('✨ AI 상담 분석 및 요약 결과가 클립보드에 복사되었습니다. (한글 문서 또는 보고서에 즉시 붙여넣기 가능)');
+      setTimeout(() => setSummaryCopied(false), 3000);
+      setTimeout(() => setSummaryCopyToast(null), 4500);
+    } catch (err) {
+      console.error('Clipboard copy failed:', err);
+    }
+  };
+
   // Trigger AI Analysis via Server Endpoint
   const runAIAnalysis = async () => {
     if (!transcriptText.trim()) {
@@ -1401,6 +1612,9 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setAnalysisResult(data.result);
       setIsWizardMode(true);
       setActiveMainTab('wizard');
+
+      // Auto-link consultation content to client's '상담기록지' form, save draft, and trigger guidance popup
+      executeAutoSaveCounselingDoc(data.result);
 
       // Auto-transmit 3-line summary to dashboard if enabled
       if (autoSendToInsights && onPushInsightToDashboard) {
@@ -1519,6 +1733,9 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       setAnalysisResult(emergencyResult);
       setIsWizardMode(true);
       setActiveMainTab('wizard');
+
+      // Auto-link consultation content to client's '상담기록지' form, save draft, and trigger guidance popup
+      executeAutoSaveCounselingDoc(emergencyResult);
 
       if (autoSendToInsights && onPushInsightToDashboard) {
         transmitInsightToDashboard(emergencyResult);
@@ -1882,28 +2099,75 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
       {/* Mode Views Switching */}
       {activeMainTab === 'wizard' ? (
         analysisResult ? (
-          <AIFormWizardStepView
-            analysisResult={analysisResult}
-            client={clients.find((c) => c.id === targetClientId) || selectedClient || undefined}
-            documentType={documentType}
-            workerNotes={workerNotes}
-            transcriptText={transcriptText}
-            onUpdateAnalysisResult={(updated) => setAnalysisResult(updated)}
-            onFinishAndSave={(finalDoc) => {
-              setActiveMainTab('transcript');
-              setIsWizardMode(false);
-              onGenerateDocument(finalDoc);
-            }}
-            onPushInsightToDashboard={(insight) => {
-              if (onPushInsightToDashboard) {
-                onPushInsightToDashboard(insight);
-              }
-            }}
-            onBackToStudio={() => {
-              setActiveMainTab('transcript');
-              setIsWizardMode(false);
-            }}
-          />
+          <div className="space-y-4">
+            {lastAutoSavedCounselingDoc && (
+              <div
+                id="banner-counseling-doc-autosaved-wizard"
+                className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100 flex flex-wrap items-center justify-between gap-3 shadow-xs animate-fade-in"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-600 text-white shrink-0">
+                    <FileCheck2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200">
+                        상담기록지 자동 연동 • 임시저장 완료
+                      </span>
+                      <span className="text-xs font-bold">
+                        {lastAutoSavedCounselingDoc.clientName} 어르신의 '상담 및 모니터링 기록지' 서식에 자동 연동 및 임시저장되었습니다.
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-600 dark:text-stone-400 mt-0.5">
+                      연동 일시: {lastAutoSavedCounselingDoc.updatedAt} • 상태: 임시저장 (서식 작성기에서 언제든 확인 및 수정 가능)
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    id="btn-reopen-guidance-modal-wizard"
+                    type="button"
+                    onClick={() => setIsAutoSaveGuidanceModalOpen(true)}
+                    className="px-2.5 py-1.5 rounded-xl border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold cursor-pointer"
+                  >
+                    안내 팝업 다시보기
+                  </button>
+                  <button
+                    id="btn-open-form-editor-wizard"
+                    type="button"
+                    onClick={() => onGenerateDocument(lastAutoSavedCounselingDoc)}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow-xs"
+                  >
+                    <FileCheck2 className="w-3.5 h-3.5" />
+                    <span>서식 확인 및 수정하기</span>
+                    <ArrowRight className="w-3 h-3 ml-0.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+            <AIFormWizardStepView
+              analysisResult={analysisResult}
+              client={clients.find((c) => c.id === targetClientId) || selectedClient || undefined}
+              documentType={documentType}
+              workerNotes={workerNotes}
+              transcriptText={transcriptText}
+              onUpdateAnalysisResult={(updated) => setAnalysisResult(updated)}
+              onFinishAndSave={(finalDoc) => {
+                setActiveMainTab('transcript');
+                setIsWizardMode(false);
+                onGenerateDocument(finalDoc);
+              }}
+              onPushInsightToDashboard={(insight) => {
+                if (onPushInsightToDashboard) {
+                  onPushInsightToDashboard(insight);
+                }
+              }}
+              onBackToStudio={() => {
+                setActiveMainTab('transcript');
+                setIsWizardMode(false);
+              }}
+            />
+          </div>
         ) : (
           <div className="bg-white dark:bg-[#1E1916] rounded-2xl p-8 border border-stone-200 dark:border-stone-800 text-center space-y-4">
             <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center mx-auto">
@@ -2973,6 +3237,92 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
               </div>
             )}
 
+            {/* Streaming Risk Alert Real-time Visual Popover (핵심 위험 키워드 초고속 시각 경고) */}
+            {streamingRiskAlert && (
+              <div
+                id="streaming-risk-keyword-alert"
+                className={`p-3.5 rounded-2xl border-2 shadow-lg transition-all animate-in slide-in-from-top-2 duration-200 ${
+                  streamingRiskAlert.severity === 'urgent'
+                    ? 'bg-rose-50/95 dark:bg-rose-950/90 border-rose-500 text-rose-950 dark:text-rose-100 ring-4 ring-rose-500/20'
+                    : 'bg-amber-50/95 dark:bg-amber-950/90 border-amber-500 text-amber-950 dark:text-amber-100 ring-4 ring-amber-500/20'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className={`p-2 rounded-xl text-white shrink-0 mt-0.5 ${
+                        streamingRiskAlert.severity === 'urgent' ? 'bg-rose-600 animate-pulse' : 'bg-amber-600'
+                      }`}
+                    >
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                            streamingRiskAlert.severity === 'urgent'
+                              ? 'bg-rose-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          }`}
+                        >
+                          실시간 위험 키워드 감지: {streamingRiskAlert.category}
+                        </span>
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-white dark:bg-stone-900 border border-current shadow-2xs">
+                          감지 키워드: "{streamingRiskAlert.keyword}"
+                        </span>
+                        <span className="text-[10px] text-stone-500">[{streamingRiskAlert.timestamp}]</span>
+                      </div>
+                      <p className="text-xs italic bg-white/70 dark:bg-stone-900/70 p-2 rounded-lg border border-black/5 dark:border-white/10 font-mono">
+                        "...{streamingRiskAlert.snippet}..."
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      id="btn-alert-add-bookmark"
+                      type="button"
+                      onClick={() => {
+                        handleMarkKeySegment(`위험징후: ${streamingRiskAlert.keyword}`);
+                        setStreamingRiskAlert(null);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                      title="이 발화 지점을 중요 북마크로 자동 등록 (단축키: M)"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" />
+                      <span>북마크 추가</span>
+                    </button>
+                    <button
+                      id="btn-alert-dismiss"
+                      type="button"
+                      onClick={() => setStreamingRiskAlert(null)}
+                      className="p-1.5 rounded-xl text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 transition-colors cursor-pointer"
+                      title="경고 닫기"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Copy Feedback Notification Toast */}
+            {summaryCopyToast && (
+              <div className="p-3 rounded-xl bg-amber-500 text-stone-950 font-bold text-xs flex items-center justify-between shadow-lg animate-in slide-in-from-top-1">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-stone-950 shrink-0" />
+                  <span>{summaryCopyToast}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSummaryCopyToast(null)}
+                  className="text-stone-900 hover:text-black cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Main Textarea with Drag & Drop Zone */}
             <div
               onDragOver={handleDragOver}
@@ -2988,7 +3338,11 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                 id="input-transcript-text"
                 rows={10}
                 value={transcriptText}
-                onChange={(e) => setTranscriptText(e.target.value)}
+                onChange={(e) => {
+                  setTranscriptText(e.target.value);
+                  checkStreamingRiskKeywords(e.target.value);
+                }}
+
                 placeholder={`[예시: 상담 대화 또는 녹취 내용]
 사회복지사: 어르신, 요즘 무릎 통증은 좀 어떠세요?
 어르신: 말도 마요. 지난주 화장실 문턱에서 넘어져서 엉덩방아를 찧었어. 밥맛도 없어서 하루 한 끼 찬물에 말아 먹어...
@@ -3211,6 +3565,53 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
 
         {/* Right Column: AI Analysis Output & Realtime Summary Auto-Mapping (5 Cols) */}
         <div className="lg:col-span-5 space-y-5">
+          {/* Automatic Counseling Form Auto-Save Banner */}
+          {lastAutoSavedCounselingDoc && (
+            <div
+              id="banner-counseling-doc-autosaved-transcript"
+              className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100 flex flex-wrap items-center justify-between gap-3 shadow-xs animate-fade-in"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-amber-600 text-white shrink-0">
+                  <FileCheck2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-200">
+                      상담기록지 임시저장
+                    </span>
+                    <span className="text-xs font-bold">
+                      {lastAutoSavedCounselingDoc.clientName} 어르신 서식 자동 연동 완료
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-stone-600 dark:text-stone-400 mt-0.5">
+                    상담 목적, 내용, 소견이 '7. 상담 및 모니터링 기록지'에 저장되었습니다.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  id="btn-reopen-guidance-modal-transcript"
+                  type="button"
+                  onClick={() => setIsAutoSaveGuidanceModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-medium cursor-pointer"
+                >
+                  안내 팝업
+                </button>
+                <button
+                  id="btn-open-form-editor-transcript"
+                  type="button"
+                  onClick={() => onGenerateDocument(lastAutoSavedCounselingDoc)}
+                  className="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs"
+                >
+                  <FileCheck2 className="w-3.5 h-3.5" />
+                  <span>확인/수정</span>
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ⚡ Real-Time Consultation Summary & Auto-Mapping Card (Triggered upon recording end or when transcript exists) */}
           {(showRealtimeSummary || transcriptText.trim().length > 15) && (
             <AIRealtimeSummaryCard
@@ -3232,7 +3633,18 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                   <Sparkles className="w-4 h-4 text-amber-400" />
                   <h3 className="text-sm font-bold">AI 사례 사정 브리핑 & 추천 계획</h3>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    id="btn-copy-summary-result"
+                    type="button"
+                    onClick={handleCopySummaryResult}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg border border-amber-500/80 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-xs transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                    title="AI 사례 사정 및 3줄 요약 결과를 클립보드에 복사"
+                  >
+                    {summaryCopied ? <Check className="w-3.5 h-3.5 text-amber-200" /> : <Copy className="w-3.5 h-3.5 text-amber-200" />}
+                    <span>{summaryCopied ? '요약 복사 완료!' : '요약 결과 복사'}</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setIsEditingAnalysis(!isEditingAnalysis)}
@@ -3446,11 +3858,22 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
                       <CheckCircle2 className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
                       사회복지사 핵심 요약 브리핑
                     </span>
-                    {isEditingAnalysis && (
-                      <span className="text-[10px] text-amber-700 dark:text-amber-400 font-normal">
-                        (각 항목을 직접 수정하세요)
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCopySummaryResult}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-600/20 hover:bg-amber-600/30 text-amber-800 dark:text-amber-200 border border-amber-500/40 flex items-center gap-1 transition-colors cursor-pointer"
+                        title="요약 브리핑 클립보드 복사"
+                      >
+                        {summaryCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        <span>{summaryCopied ? '복사됨' : '복사'}</span>
+                      </button>
+                      {isEditingAnalysis && (
+                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-normal">
+                          (각 항목을 직접 수정하세요)
+                        </span>
+                      )}
+                    </div>
                   </h4>
                   {isEditingAnalysis ? (
                     <div className="space-y-2">
@@ -3949,6 +4372,17 @@ export const AIStudioTranscript: React.FC<AIStudioTranscriptProps> = ({
           </div>
         </div>
       )}
+
+      {/* Automatic Counseling Form Auto-Save Guidance Modal */}
+      <CounselingDocAutoSaveModal
+        isOpen={isAutoSaveGuidanceModalOpen}
+        document={lastAutoSavedCounselingDoc}
+        onClose={() => setIsAutoSaveGuidanceModalOpen(false)}
+        onConfirmEdit={(doc) => {
+          setIsAutoSaveGuidanceModalOpen(false);
+          onGenerateDocument(doc);
+        }}
+      />
 
       {/* Auto-Fill Toast Notification */}
       {autoFillToast && (

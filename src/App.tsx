@@ -516,12 +516,47 @@ export default function App() {
   };
 
   const handleGeneratedDocument = (newDoc: CaseDocument) => {
-    setDocuments((prev) => [newDoc, ...prev]);
+    setDocuments((prev) => {
+      const idx = prev.findIndex((d) => d.id === newDoc.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = newDoc;
+        return copy;
+      }
+      return [newDoc, ...prev];
+    });
     setCurrentDocument(newDoc);
     const dType = newDoc.documentType || newDoc.type || 'intake';
     navigateToTab('forms', DOCUMENT_TYPE_LABELS[dType]?.label || '서식 작성기', dType);
     setDriveToast(`[${DOCUMENT_TYPE_LABELS[dType]?.label}] 서식이 자동 생성되어 작성기에 열렸습니다.`);
     setTimeout(() => setDriveToast(null), 4000);
+  };
+
+  const handleSaveDraftDocument = (draftDoc: CaseDocument) => {
+    setDocuments((prev) => {
+      const idx = prev.findIndex((d) => d.id === draftDoc.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = draftDoc;
+        return copy;
+      }
+      return [draftDoc, ...prev];
+    });
+    try {
+      const saved = localStorage.getItem('senior_care_documents');
+      const parsed: CaseDocument[] = saved ? JSON.parse(saved) : [];
+      const idx = parsed.findIndex((d) => d.id === draftDoc.id);
+      let nextDocs: CaseDocument[];
+      if (idx >= 0) {
+        nextDocs = [...parsed];
+        nextDocs[idx] = draftDoc;
+      } else {
+        nextDocs = [draftDoc, ...parsed];
+      }
+      localStorage.setItem('senior_care_documents', JSON.stringify(nextDocs));
+    } catch (e) {
+      console.error('Failed to sync draft doc to localStorage:', e);
+    }
   };
 
   const handlePushInsightToDashboard = (insight: ConsultationInsight) => {
@@ -840,6 +875,8 @@ export default function App() {
                 onGenerateDocument={handleGeneratedDocument}
                 selectedClient={selectedClientForAI}
                 onPushInsightToDashboard={handlePushInsightToDashboard}
+                userSettings={userSettings}
+                onSaveDraftDocument={handleSaveDraftDocument}
               />
             </div>
           )}

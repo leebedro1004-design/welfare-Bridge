@@ -36,6 +36,7 @@ import {
   MicOff,
   Radio,
   Volume2,
+  HelpCircle,
   X
 } from 'lucide-react';
 import { GoogleAuthUser, UserSettings } from '../types';
@@ -59,6 +60,7 @@ interface HeaderProps {
   onOpenMajorFormsModal?: () => void;
   onOpenNewClientModal?: () => void;
   onToggleMobileSidebar?: () => void;
+  onReopenTutorial?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -77,6 +79,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMajorFormsModal,
   onOpenNewClientModal,
   onToggleMobileSidebar,
+  onReopenTutorial,
 }) => {
   const [isDark, setIsDark] = useState<boolean>(() => {
     return document.documentElement.classList.contains('dark') ||
@@ -410,6 +413,20 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <LogIn className="w-3 h-3" />
                 <span>Google 로그인</span>
+              </button>
+            )}
+
+            {/* Help Guide Reopen Button (도움말 가이드 다시 보기) */}
+            {onReopenTutorial && (
+              <button
+                id="btn-reopen-tutorial"
+                type="button"
+                onClick={onReopenTutorial}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600/60 text-amber-300 font-bold text-[10px] transition-colors cursor-pointer"
+                title="처음 사용자를 위한 5일 튜토리얼 & 실습 가이드 다시 보기"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">도움말 가이드</span>
               </button>
             )}
 
