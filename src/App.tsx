@@ -849,6 +849,7 @@ export default function App() {
             <FormEditor
               currentDocument={currentDocument}
               clients={clients}
+              documents={documents}
               userSettings={userSettings}
               onSaveDocument={handleSaveDocument}
               consultationInsights={liveInsights}

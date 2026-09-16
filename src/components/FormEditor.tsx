@@ -63,6 +63,12 @@ import { CaseLifecycleProgressBar } from './CaseLifecycleProgressBar';
 import { focusSoundService, SoundType } from '../utils/focusSoundService';
 import { QuickFillModal } from './QuickFillModal';
 import { getLatestConsultationInsight, applyQuickFillToDocument } from '../utils/quickFillHelper';
+import { SmartFillModal } from './SmartFillModal';
+import {
+  getLatestConsultationNotesForClient,
+  executeSmartFillApi,
+  applySmartFillToDocument,
+} from '../utils/smartFillHelper';
 import { IntakeFormView } from './forms/IntakeFormView';
 import { AssessmentFormView } from './forms/AssessmentFormView';
 import { ScoringFormView } from './forms/ScoringFormView';
@@ -80,6 +86,7 @@ import html2canvas from 'html2canvas';
 interface FormEditorProps {
   currentDocument: CaseDocument | null;
   clients: ClientProfile[];
+  documents?: CaseDocument[];
   userSettings?: UserSettings;
   onSaveDocument: (doc: CaseDocument) => void;
   onSelectClientForNewDoc?: (client: ClientProfile) => void;
@@ -89,6 +96,7 @@ interface FormEditorProps {
 export const FormEditor: React.FC<FormEditorProps> = ({
   currentDocument,
   clients,
+  documents = [],
   userSettings,
   onSaveDocument,
   onSelectClientForNewDoc,
@@ -115,12 +123,59 @@ export const FormEditor: React.FC<FormEditorProps> = ({
   const [selectedPresetId, setSelectedPresetId] = useState<ConditionPresetId>('standard');
   const [presetAppliedToast, setPresetAppliedToast] = useState<string | null>(null);
 
+  // Smart Fill State (Gemini AI 최신 상담 기록 연동 법정 서식 자동 채우기)
+  const [isSmartFillModalOpen, setIsSmartFillModalOpen] = useState<boolean>(false);
+  const [isSmartFillingDirect, setIsSmartFillingDirect] = useState<boolean>(false);
+  const [smartFillToast, setSmartFillToast] = useState<string | null>(null);
+
   // Quick-Fill State (어르신 프로필 및 최근 상담 인사이트 기반 자동완성)
   const [isQuickFillModalOpen, setIsQuickFillModalOpen] = useState<boolean>(false);
   const [quickFillToast, setQuickFillToast] = useState<string | null>(null);
 
   const activeClient = clients.find((c) => c.id === doc.clientId) || clients[0];
   const activeInsight = getLatestConsultationInsight(activeClient?.id || '', activeClient, consultationInsights);
+
+  const handleOpenSmartFill = () => {
+    setIsSmartFillModalOpen(true);
+  };
+
+  const handleApplySmartFill = (updatedDoc: CaseDocument, filledCount: number, summaryMessage: string) => {
+    setDoc(updatedDoc);
+    try {
+      confetti({
+        particleCount: 65,
+        spread: 80,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {}
+    setSmartFillToast(summaryMessage);
+    setTimeout(() => setSmartFillToast(null), 5000);
+  };
+
+  // Instant 1-click Direct Smart Fill
+  const handleDirectSmartFill = async () => {
+    if (!activeClient) return;
+    setIsSmartFillingDirect(true);
+    try {
+      const detection = getLatestConsultationNotesForClient(activeClient, doc, documents, consultationInsights);
+      const response = await executeSmartFillApi({
+        documentType: doc.documentType,
+        consultationNotes: detection.notes,
+        clientProfile: activeClient,
+        currentDocument: doc,
+      });
+      const { updatedDoc, filledCount } = applySmartFillToDocument(doc, response.data);
+      const docLabel = DOCUMENT_TYPE_LABELS[doc.documentType]?.short || '서식';
+      const summaryMsg = `✨ [${docLabel}] 스마트 필 완료: 최근 상담 기록을 바탕으로 ${filledCount}개 항목이 성공적으로 자동 완성되었습니다.`;
+      handleApplySmartFill(updatedDoc, filledCount, summaryMsg);
+    } catch (err: any) {
+      console.error('Direct Smart Fill Error:', err);
+      // Open modal so the user can inspect or retry
+      setIsSmartFillModalOpen(true);
+    } finally {
+      setIsSmartFillingDirect(false);
+    }
+  };
 
   const handleOpenQuickFill = () => {
     setIsQuickFillModalOpen(true);
@@ -796,6 +851,34 @@ export const FormEditor: React.FC<FormEditorProps> = ({
 
         {/* Right: Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Smart Fill (Gemini AI 최신 상담 기록 연동 법정 서식 자동 완성) */}
+          <div className="inline-flex rounded-xl shadow-xs">
+            <button
+              id="btn-smart-fill"
+              type="button"
+              onClick={handleOpenSmartFill}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black rounded-l-xl border border-r-0 border-indigo-500 dark:border-indigo-600 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white transition-all cursor-pointer active:scale-95 shadow-xs"
+              title="최근 상담 기록(음성 녹취/현장 메모)을 Gemini AI로 정밀 분석하여 현재 열려 있는 법정 서식의 관련 항목들을 스마트하게 자동 채우기"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>스마트 필 (Smart Fill)</span>
+            </button>
+            <button
+              id="btn-smart-fill-instant"
+              type="button"
+              onClick={handleDirectSmartFill}
+              disabled={isSmartFillingDirect}
+              className="px-2 py-1.5 text-[11px] font-bold rounded-r-xl border border-indigo-500 dark:border-indigo-600 bg-purple-700 hover:bg-purple-800 text-white transition-all cursor-pointer disabled:opacity-50"
+              title="검토창 없이 즉시 최근 상담 기록 기반 스마트 필 실행"
+            >
+              {isSmartFillingDirect ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+              ) : (
+                <span>⚡즉시</span>
+              )}
+            </button>
+          </div>
+
           {/* Quick-Fill (어르신 프로필 및 최근 상담 인사이트 연동 자동완성) */}
           <div className="inline-flex rounded-xl shadow-xs">
             <button
@@ -963,6 +1046,28 @@ export const FormEditor: React.FC<FormEditorProps> = ({
         </div>
       </div>
 
+      {/* Smart Fill Toast Notification */}
+      {smartFillToast && (
+        <div
+          id="toast-smart-fill-success"
+          className="p-3.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3 text-xs font-bold animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+              <Wand2 className="w-3.5 h-3.5 fill-white text-white" />
+            </div>
+            <span>{smartFillToast}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSmartFillToast(null)}
+            className="p-1 hover:bg-white/20 rounded-md transition-colors cursor-pointer text-white/90 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Quick-Fill Toast Notification */}
       {quickFillToast && (
         <div
@@ -1107,6 +1212,18 @@ export const FormEditor: React.FC<FormEditorProps> = ({
           )}
         </div>
       )}
+
+      {/* Smart Fill Modal (Gemini AI 최신 상담 기록 기반 법정 서식 자동 채우기 모달) */}
+      <SmartFillModal
+        isOpen={isSmartFillModalOpen}
+        onClose={() => setIsSmartFillModalOpen(false)}
+        doc={doc}
+        client={activeClient}
+        documents={documents}
+        consultationInsights={consultationInsights}
+        userSettings={userSettings}
+        onApply={handleApplySmartFill}
+      />
 
       {/* Quick-Fill Modal (어르신 프로필 및 최근 상담 인사이트 기반 자동완성 모달) */}
       <QuickFillModal

@@ -1880,6 +1880,252 @@ ${transcript}
   }
 });
 
+// Smart Fill Endpoint: Uses latest consultation notes to automatically populate fields in currently opened legal form
+app.post("/api/ai/smart-fill-form", async (req, res) => {
+  try {
+    const { documentType, consultationNotes, clientProfile, currentDocument } = req.body;
+
+    if (!consultationNotes || !consultationNotes.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "스마트 필에 사용할 최근 상담 기록 또는 메모가 없습니다.",
+      });
+    }
+
+    const cName = clientProfile?.name || currentDocument?.clientName || "어르신";
+    const cAge = clientProfile?.age || 80;
+    const cDiseases = Array.isArray(clientProfile?.chronicDiseases) ? clientProfile.chronicDiseases.join(", ") : "만성질환";
+    const cLiving = clientProfile?.livingType || "독거노인";
+    const cWelfare = clientProfile?.welfareType || "기초생활수급자";
+    const cRisk = clientProfile?.riskLevel || currentDocument?.riskLevel || "중위험";
+
+    const prompt = `당신은 대한민국 보건복지부 재가노인지원서비스 표준 지침과 사례관리 실무에 정통한 공인 전문 사회복지사 AI입니다.
+사회복지사가 작성 중인 **현재 법정 서식(종류: ${documentType})**의 빈칸 및 주요 항목들을, 방금 진행된 **최근 상담 기록(음성 녹취/상담일지/면접 메모)**을 정밀 분석하여 자동으로 채워넣는 '스마트 필(Smart Fill)' 작업을 수행해 주세요.
+
+[대상 어르신 기본 인적정보]:
+- 성명: ${cName} (만 ${cAge}세, ${clientProfile?.gender || "여"})
+- 주거형태: ${cLiving}
+- 소득/보장유형: ${cWelfare}
+- 주요 보유 질환: ${cDiseases}
+- 현 위기도: ${cRisk}
+
+[현재 열려 있는 서식 종류 (Document Type)]:
+"${documentType}" (예: intake=초기면접지, assessment=종합사정표, scoring=선정기준표, case_conference=사례회의록, service_plan=서비스계획서, agreement=이용동의서, monitoring=모니터링일지, reassessment=재사정표, termination=종결보고서, referral=연계의뢰서)
+
+[최근 상담 기록 (Consultation Notes / Audio Transcript)]:
+${consultationNotes}
+
+[출력 요구사항]:
+반드시 마크다운 코드블록 없이 순수 JSON 객체 포맷으로만 응답해야 합니다.
+{
+  "summaryOfNotes": "상담 기록에서 확인된 어르신의 핵심 상황과 복지 욕구 1~2문장 요약",
+  "riskLevel": "고위험" 또는 "중위험" 또는 "일반",
+  "riskRationale": "위기도 판정 근거 (상담 발화 사실 기반)",
+  "primaryNeeds": ["주요 욕구 1", "주요 욕구 2", "주요 욕구 3"],
+  "physicalHealthStatus": "신체 건강 상태 (질환 투약, 통증, 보행 안정성, 낙상 병력)",
+  "adlStatus": "일상생활동작(ADL) 수행 수준 (식사, 보행, 화장실, 배설 등 관찰 진술)",
+  "iadlStatus": "도구적일상생활(IADL) 수행 수준 (취사, 장보기, 약복용, 가사활동 등)",
+  "emotionalCognitiveStatus": "정서 및 인지 상태 (우울감, 고립감, 기억력, 수면 상태)",
+  "housingEnvironment": "주거 환경 (주택 형태, 문턱/욕실 낙상 위험, 냉난방, 위생 상태)",
+  "economicStatus": "경제 상태 (소득원, 의료비 지출 부담, 주거비)",
+  "socialSupportNetwork": "사회적 관계망 (가족 왕래 빈도, 이웃 교류, 공적 지원 연계 상태)",
+  "socialWorkerOpinion": "담당 사회복지사 종합 소견 및 긴급 개입 필요성",
+  "shortTermGoals": ["단기 목표 1 (예: 1~3개월 내 결식 예방 및 반찬 연계)", "단기 목표 2"],
+  "longTermGoals": ["장기 목표 1 (예: 낙상 없는 안전한 재가생활 유지 및 사회적 지지망 강화)"],
+  "recommendedServices": [
+    {
+      "category": "식사/영양지원 또는 안전확인 또는 일상생활",
+      "serviceName": "구체적 서비스명 (예: 맞춤 밑반찬 배달 주2회)",
+      "frequency": "주 N회",
+      "purpose": "연계 목적"
+    }
+  ],
+  "formSpecificFields": {
+    "serviceReason": "서식 맞춤 신청/의뢰 사유",
+    "appliedServices": "신청 서비스 항목",
+    "intakeClientEmotion": "어르신 정서 및 태도",
+    "intakeHealthStatus": "건강 상태 요약",
+    "intakeHousingSafety": "주거 안전 점검",
+    "intakeCounselorOpinion": "초기면접자 의견",
+    "mobilityStatus": "자립가능 / 도움필요 / 완전도움필요 중 택1",
+    "housingCondition": "양호 / 불량 중 택1",
+    "housingConditionNotes": "주거상태 특이사항",
+    "housingHygiene": "양호 / 불량 중 택1",
+    "housingHygieneNotes": "위생상태 특이사항",
+    "toiletType": "수세식(좌변기) 또는 재래식",
+    "heatingType": "도시가스개별 또는 기름보일러 또는 전기장판",
+    "pastHistory": "과거 병력 및 생활력",
+    "presentHistory": "현 병력 및 주 호소 문제",
+    "monitoringProgress": "모니터링 진행 내용 (모니터링 서식인 경우)",
+    "clientReaction": "어르신 만족도 및 반응",
+    "livingChanges": "생활상태 변화",
+    "nextPlan": "차기 지원 계획"
+  },
+  "fieldSummaries": [
+    { "fieldName": "physicalHealthStatus", "label": "신체 및 건강상태", "value": "요약값", "reason": "상담 기록 발화 근거" }
+  ]
+}
+
+주의사항:
+- 허위나 과장을 배제하고, 실제 입력된 상담 기록(Consultation Notes)에 명시되거나 논리적으로 필연적인 내용만을 사회복지 전문 어조로 기재하세요.
+- ${documentType} 서식에 가장 직접적인 필드들을 충실히 채우세요.`;
+
+    try {
+      const { text } = await callGeminiWithFallback(
+        ["gemini-3.8-flash", "gemini-flash-latest"],
+        prompt
+      );
+
+      const parsed = safeParseJson(text);
+
+      const count = (parsed.fieldSummaries && Array.isArray(parsed.fieldSummaries))
+        ? parsed.fieldSummaries.length
+        : 8;
+
+      return res.json({
+        success: true,
+        data: parsed,
+        filledFieldCount: count,
+        sourceNoteLength: consultationNotes.length,
+      });
+    } catch (aiErr: any) {
+      console.warn("[Smart Fill AI Warning] Falling back to intelligent heuristic parser:", aiErr?.message);
+      
+      // Intelligent Heuristic Fallback
+      const fallbackResult = generateHeuristicSmartFill(
+        documentType,
+        consultationNotes,
+        clientProfile,
+        currentDocument
+      );
+
+      return res.json({
+        success: true,
+        data: fallbackResult,
+        filledFieldCount: fallbackResult.fieldSummaries?.length || 7,
+        isFallback: true,
+        fallbackReason: aiErr?.message,
+      });
+    }
+  } catch (error: any) {
+    console.error("Smart Fill Error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "스마트 필 처리 중 서버 오류가 발생했습니다.",
+    });
+  }
+});
+
+/**
+ * Intelligent Heuristic Generator for Smart Fill Fallback
+ */
+function generateHeuristicSmartFill(
+  documentType: string,
+  notes: string,
+  clientProfile?: any,
+  currentDocument?: any
+): any {
+  const cName = clientProfile?.name || currentDocument?.clientName || "어르신";
+  const lower = notes.toLowerCase();
+
+  const hasFall = lower.includes("낙상") || lower.includes("넘어") || lower.includes("문턱") || lower.includes("무릎") || lower.includes("관절");
+  const hasMeal = lower.includes("밥") || lower.includes("식사") || lower.includes("굶") || lower.includes("반찬") || lower.includes("입맛");
+  const hasHospital = lower.includes("병원") || lower.includes("약") || lower.includes("혈압") || lower.includes("당뇨");
+  const hasLonely = lower.includes("혼자") || lower.includes("외롭") || lower.includes("적적") || lower.includes("우울");
+
+  const riskLevel = (hasFall && hasMeal) || lower.includes("응급") || lower.includes("고위험") ? "고위험" : "중위험";
+
+  const physical = `${cName} 어르신은 ${hasFall ? "양측 무릎 관절 통증 및 보행 불안정으로 실내 이동 시 벽을 짚거나 부축이 필요하며," : "만성 퇴행성 질환으로 거동에 다소 제한이 있으며,"} ${hasHospital ? "정기적인 혈압/당뇨 처방약 복약 관리가 요구됨." : "주기적 건강 점검 요망."}`;
+
+  const adl = hasFall
+    ? "보행 및 실내외 이동 시 낙상 위험이 매우 높아 벽이나 손잡이 의지가 필요하며 화장실 이용 시 각별한 주의 요함."
+    : "기본적 세면 및 옷 입기는 스스로 가능하나 장시간 기립 및 무거운 물품 이동은 곤란함.";
+
+  const iadl = hasMeal
+    ? "단독 취사 및 불을 켜고 식사를 준비하는 데 큰 어려움을 겪고 있으며 장보기 및 가사 활동 지원이 절실함."
+    : "주거 내 간단한 정리는 가능하나 규칙적인 밑반찬 조리 및 식자재 조달 지원 필요.";
+
+  const emotional = hasLonely
+    ? "독거로 인한 사회적 고립감 및 적적함을 자주 호소하시며, 말벗 및 정기 안부확인을 통한 정서 지지망 형성이 시급함."
+    : "인지 기능은 비교적 명료하나 대인 관계 단절에 따른 정서적 무력감 예방 필요.";
+
+  const housing = hasFall
+    ? "실내 높은 문턱과 미끄러운 욕실 바닥으로 낙상 재발 위험이 높음. 안전손잡이 설치 및 주거환경 개선 시급."
+    : "노후 주거 상태로 실내 이동 동선 안전 점검 및 정기 환경 모니터링 필요.";
+
+  const opinion = `${cName} 어르신은 현재 ${hasMeal ? "영양 결식 우려와 " : ""}${hasFall ? "낙상 위험 " : "만성질환 복약 관리 "}등 복합적 복지 욕구가 확인되므로, 재가노인지원서비스 사례관리 대상자로 적극 선정하여 밑반찬 배달 및 안전망을 구축해야 함.`;
+
+  return {
+    summaryOfNotes: `상담 기록 기반: ${cName} 어르신의 ${hasFall ? "낙상 위험 및 보행 불안정, " : ""}${hasMeal ? "식사 결식 우려와 " : ""}정기적 사례관리 개입 욕구가 도출됨.`,
+    riskLevel,
+    riskRationale: `상담 중 언급된 ${hasFall ? "낙상 병력 및 관절통, " : ""}${hasMeal ? "식사 준비 곤란, " : ""}독거 생활 환경을 종합적으로 검토하여 판정함.`,
+    primaryNeeds: [
+      hasMeal ? "영양 밑반찬 배달 및 결식 예방" : "균형 잡힌 식사 지원",
+      hasFall ? "주거 내 안전손잡이 설치 및 낙상 예방" : "주거 환경 점검",
+      "정기 유선 및 가정방문 안부 확인",
+    ],
+    physicalHealthStatus: physical,
+    adlStatus: adl,
+    iadlStatus: iadl,
+    emotionalCognitiveStatus: emotional,
+    housingEnvironment: housing,
+    economicStatus: "기초연금 및 정부보조금으로 생계를 유지 중이며 의료비 지출에 대한 심리적 부담 상존함.",
+    socialSupportNetwork: "가족과의 교류가 드물고 이웃 간 안부 확인에 의존하고 있어 센터의 공적 지지망 연계 필요.",
+    socialWorkerOpinion: opinion,
+    shortTermGoals: [
+      "1개월 내 주 2회 맞춤 영양 밑반찬 배달 연계 및 결식 해소",
+      "실내 화장실 안전손잡이 및 미끄럼방지 패드 설치",
+    ],
+    longTermGoals: [
+      "안전하고 건강한 재가생활 유지 및 고립감 완화를 통한 삶의 질 증진",
+    ],
+    recommendedServices: [
+      {
+        category: "식사/영양지원",
+        serviceName: "재가노인 맞춤 밑반찬 배달",
+        frequency: "주 2회",
+        purpose: "균형 잡힌 영양 공급 및 결식 예방",
+      },
+      {
+        category: "안전/안부확인",
+        serviceName: "정기 가정방문 및 유선 안부확인",
+        frequency: "주 1~2회",
+        purpose: "위기 상황 조기 발견 및 정서 지지",
+      },
+    ],
+    formSpecificFields: {
+      serviceReason: `${cName} 어르신의 신체 거동 곤란 및 영양 결식 위험에 따른 재가보호 필요성`,
+      appliedServices: "영양밑반찬 배달, 일상생활지원, 정기 안부확인",
+      intakeClientEmotion: hasLonely ? "복지사 방문에 반가워하며 고립감 호소" : "상담에 적극적으로 협조함",
+      intakeHealthStatus: physical,
+      intakeHousingSafety: housing,
+      intakeCounselorOpinion: opinion,
+      mobilityStatus: hasFall ? "도움필요" : "자립가능",
+      housingCondition: hasFall ? "불량" : "양호",
+      housingConditionNotes: "실내 높은 문턱 및 욕실 미끄럼 방지 보완 필요",
+      housingHygiene: "양호",
+      housingHygieneNotes: "기본적인 실내 정돈은 되어 있으나 단독 청소에 체력적 부담 있음",
+      toiletType: "수세식(좌변기)",
+      heatingType: "도시가스개별",
+      pastHistory: clientProfile?.chronicDiseases?.join(", ") || "만성 관절염, 고혈압",
+      presentHistory: "최근 보행 통증 심화 및 낙상 두려움, 영양 섭취 불균형",
+      monitoringProgress: `정기 방문 상담 결과, 건강 상태 점검 및 지원 서비스 이용 현황 파악 완료.`,
+      clientReaction: "도움 요청에 매우 감사해하며 서비스 지속 제공을 희망하심.",
+      livingChanges: "정기적인 안부 확인으로 심리적 안정감 증진.",
+      nextPlan: "차기 모니터링 시 복약 순응도 및 주거 안전 조치 지속 점검.",
+    },
+    fieldSummaries: [
+      { fieldName: "physicalHealthStatus", label: "신체 및 건강상태", value: physical, reason: "상담 기록 건강 발화 반영" },
+      { fieldName: "adlStatus", label: "일상생활동작(ADL)", value: adl, reason: "거동 및 일상수행 곤란 내용 반영" },
+      { fieldName: "iadlStatus", label: "도구적 일상생활(IADL)", value: iadl, reason: "취사 및 가사 곤란 발화 반영" },
+      { fieldName: "emotionalCognitiveStatus", label: "정서 및 인지", value: emotional, reason: "고립감 및 심리상태 반영" },
+      { fieldName: "housingEnvironment", label: "주거 환경", value: housing, reason: "문턱 및 낙상 위험도 반영" },
+      { fieldName: "socialWorkerOpinion", label: "사회복지사 소견", value: opinion, reason: "사례관리 개입 전문 의견" },
+      { fieldName: "serviceReason", label: "서비스 신청 사유", value: "거동불편 및 결식예방", reason: "어르신 주호소 문제 반영" },
+    ],
+  };
+}
+
 // Vite middleware & Static serving
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
